@@ -1,6 +1,6 @@
-# OC2 Canary
+# OC2 SuperTask Pilot
 
-Asmond-only, isolated SuperTask pilot. It does not replace or modify the production OC2 scheduler.
+Asmond-only SuperTask pilot. It began fully isolated, then started a staged production-loop migration on 2026-08-15 after the canary and Herdr handoff passed end to end.
 
 - Dashboard: `http://asmond.story-mimosa.ts.net:14680` (tailnet only)
 - Database: `~/.local/share/opencode-supertask-canary/tasks.db`
@@ -10,7 +10,21 @@ Asmond-only, isolated SuperTask pilot. It does not replace or modify the product
 - OpenCode executable: `/Users/williamvest/local/bin/opencode2`
 - Human handoff: enabled into Herdr workspace `Scheduled Handoffs`
 
-The pilot runs one harmless `infra` task every six hours. The prompt returns the marker `SUPERTASK_CANARY_OK` and explicitly forbids tool use. Keep the existing production scheduler unchanged for the full seven-day observation window.
+The pilot retains one harmless `infra` task every six hours. The prompt returns the marker `SUPERTASK_CANARY_OK` and explicitly forbids tool use.
+
+## Staged production migration
+
+`task-janitor` is the first migrated loop. Its SuperTask template preserves the legacy schedule, prompt, agent, model, cwd, timeout, max-instance limit, and Gatus heartbeat. The legacy scheduler copy was deleted only after the enabled SuperTask template was read back successfully, so there is exactly one owner of the 07:00 heartbeat.
+
+- SuperTask template ID: `2`
+- Schedule: `0 7 * * *`
+- Agent/model: `anton` / `zai/glm-5.2`
+- Working directory: `/Users/williamvest`
+- Timeout/retries: 10 minutes / 1 retry with 5-minute backoff
+- Gatus dead-man: existing `loops_task-janitor` endpoint, unchanged
+- First scheduled SuperTask run: 2026-08-16 at 07:00 local
+
+Do not migrate another loop until this run completes successfully and its task/run history, report/spine writes, and Gatus heartbeat are verified. Daily brief and email loops migrate last.
 
 For an explicit human handoff test, a managed Agent calls `supertask_handoff`. The original headless run becomes `awaiting_input`, a persistent tab opens in Herdr's `Scheduled Handoffs` workspace, and the same OpenCode 2 session resumes there. Exiting that TUI normally completes the task.
 
@@ -25,7 +39,7 @@ SUPERTASK_CONFIG_PATH="$PWD/deploy/canary/supertask-canary.json" \
 bun dist/cli/index.js list
 ```
 
-Rollback stops only the canary:
+Rollback for `task-janitor`: disable SuperTask template `2`, then restore the legacy job from `vv-opencode` git commit `5abc00c` / scheduler history. Never leave both enabled. Stopping the entire pilot remains:
 
 ```sh
 launchctl bootout gui/$(id -u)/com.vv.supertask-canary
