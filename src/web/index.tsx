@@ -53,12 +53,32 @@ const TASK_STATUSES = new Set<TaskStatus>([
     'pending', 'running', 'done', 'failed', 'dead_letter', 'cancelled',
 ]);
 const SESSION_ID_PATTERN = /^ses_[A-Za-z0-9_]+$/;
-const LOOPBACK_HOST_PATTERN = /^(?:localhost|127\.0\.0\.1|\[::1\])(?::([1-9]\d{0,4}))?$/i;
 let runtimeConfig: GatewayConfig | null = null;
 let restartScheduled = false;
 
 export function setDashboardRuntimeConfig(config: GatewayConfig | null): void {
     runtimeConfig = config === null ? null : structuredClone(config);
+}
+
+function isAllowedDashboardHostname(hostname: string): boolean {
+    const normalized = hostname.toLowerCase();
+    if (['localhost', '127.0.0.1', '[::1]'].includes(normalized)) return true;
+    return runtimeConfig?.dashboard.host?.toLowerCase() === normalized;
+}
+
+function isAllowedDashboardHostHeader(hostHeader: string): boolean {
+    if (/[%@/#?,\s]/.test(hostHeader)) return false;
+    try {
+        const parsed = new URL(`http://${hostHeader}`);
+        return parsed.username === ''
+            && parsed.password === ''
+            && parsed.pathname === '/'
+            && parsed.search === ''
+            && parsed.hash === ''
+            && isAllowedDashboardHostname(parsed.hostname);
+    } catch {
+        return false;
+    }
 }
 
 function isValidSessionId(value: string | null | undefined): value is string {
@@ -305,12 +325,8 @@ function resolveLocale(c: Context): Locale {
 app.use('*', async (c, next) => {
     const requestHostname = new URL(c.req.url).hostname;
     const hostHeader = c.req.header('Host');
-    const loopbackHosts = ['localhost', '127.0.0.1', '[::1]'];
-    const hostMatch = hostHeader?.match(LOOPBACK_HOST_PATTERN) ?? null;
-    const hostPort = hostMatch?.[1] === undefined ? null : Number(hostMatch[1]);
-    if (!loopbackHosts.includes(requestHostname)
-        || (hostHeader !== undefined
-            && (!hostMatch || (hostPort !== null && hostPort > 65_535)))) {
+    if (!isAllowedDashboardHostname(requestHostname)
+        || (hostHeader !== undefined && !isAllowedDashboardHostHeader(hostHeader))) {
         return c.json({ error: 'invalid dashboard host' }, 421);
     }
     await next();
@@ -332,8 +348,8 @@ app.use('/api/*', async (c, next) => {
         try {
             const originUrl = new URL(origin);
             const requestUrl = new URL(c.req.url);
-            const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(originUrl.hostname);
-            if (!loopback || originUrl.origin !== requestUrl.origin) {
+            if (!isAllowedDashboardHostname(originUrl.hostname)
+                || originUrl.origin !== requestUrl.origin) {
                 return c.json({ error: 'cross-site request rejected' }, 403);
             }
         } catch {

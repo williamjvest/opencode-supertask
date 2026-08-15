@@ -7,6 +7,7 @@ import dashboardServer, {
     isSafeDashboardRestartTarget,
     presentRunLog,
     resolveDashboardConfigState,
+    setDashboardRuntimeConfig,
 } from '../src/web/index';
 import { resolveEditedRunAt } from '../src/web/ui';
 import { TaskService } from '../src/core/services/task.service';
@@ -19,6 +20,7 @@ import {
     resetGatewayHealth,
 } from '../src/gateway/health';
 import { clearDashboardGatewayDiagnosticCache } from '../src/web/gateway-diagnostic';
+import { validateConfig } from '../src/gateway/config';
 
 describe('Dashboard 安全边界', () => {
     let testDb: ReturnType<typeof setupTestDb>;
@@ -682,6 +684,36 @@ describe('Dashboard 安全边界', () => {
                 headers: { Host: host },
             });
             expect(allowed.status).toBe(404);
+        }
+    });
+
+    test('仅允许运行时配置的 tailnet Host，并保持同源写保护', async () => {
+        setDashboardRuntimeConfig(validateConfig({
+            dashboard: { host: 'asmond.story-mimosa.ts.net', port: 14680 },
+        }));
+        try {
+            const read = await dashboardApp.request(
+                'http://asmond.story-mimosa.ts.net:14680/api/tasks/99999',
+            );
+            expect(read.status).toBe(404);
+
+            const task = await TaskService.add({ name: 'tailnet task', agent: 'a', prompt: 'p' });
+            const write = await dashboardApp.request(
+                `http://asmond.story-mimosa.ts.net:14680/api/tasks/${task.id}`,
+                {
+                    method: 'DELETE',
+                    headers: { Origin: 'http://asmond.story-mimosa.ts.net:14680' },
+                },
+            );
+            expect(write.status).toBe(200);
+
+            const spoofed = await dashboardApp.request(
+                'http://evil.example/api/tasks/99999',
+                { headers: { Host: 'asmond.story-mimosa.ts.net:14680' } },
+            );
+            expect(spoofed.status).toBe(421);
+        } finally {
+            setDashboardRuntimeConfig(null);
         }
     });
 
