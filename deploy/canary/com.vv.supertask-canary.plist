@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.vv.supertask-canary</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/bun</string>
+    <string>/Users/williamvest/Projects/opencode-supertask/dist/cli/index.js</string>
+    <string>gateway</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/williamvest/Projects/opencode-supertask</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/Users/williamvest/local/bin:/Users/williamvest/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>SUPERTASK_CONFIG_PATH</key>
+    <string>/Users/williamvest/Projects/opencode-supertask/deploy/canary/supertask-canary.json</string>
+    <key>SUPERTASK_DB_PATH</key>
+    <string>/Users/williamvest/.local/share/opencode-supertask-canary/tasks.db</string>
+    <key>SUPERTASK_OPENCODE_BIN</key>
+    <string>/Users/williamvest/local/bin/opencode2</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>StandardOutPath</key>
+  <string>/Users/williamvest/.local/state/opencode-supertask-canary/gateway.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/williamvest/.local/state/opencode-supertask-canary/gateway.error.log</string>
+</dict>
+</plist>

@@ -200,7 +200,7 @@ describe('WorkerEngine', () => {
 
         expect(args).toEqual([
             'run', '--agent', 'test-agent', '--format', 'json',
-            '-m', 'test-model', '--variant', 'xhigh', prompt,
+            '-m', 'test-model#xhigh', prompt,
         ]);
         expect(childEnv.managedRun).toBe(MANAGED_RUN_ENV_VALUE);
         if (!childEnv.pwd) throw new Error('子进程未记录 PWD');
@@ -219,7 +219,7 @@ describe('WorkerEngine', () => {
         expect(runs[0].log).toContain('任务执行完成');
         expect(runs[0].log).toContain('"type":"supertask_command"');
         expect(runs[0].log).toContain('"args":["run","--agent","test-agent"');
-        expect(runs[0].log).toContain('"--variant","xhigh"');
+        expect(runs[0].log).toContain('"-m","test-model#xhigh"');
         expect(runs[0].log).toContain(JSON.stringify(prompt).slice(1, -1));
     });
 
@@ -651,16 +651,20 @@ describe('WorkerEngine', () => {
         workers.push(worker);
         const originalCompleteRun = TaskService.completeRun;
         const unhandled: unknown[] = [];
+        let settlementAttempts = 0;
         const onUnhandled = (reason: unknown) => unhandled.push(reason);
         process.on('unhandledRejection', onUnhandled);
         TaskService.completeRun = async () => {
+            settlementAttempts += 1;
             throw new Error('模拟结算写入失败');
         };
 
         try {
             worker.start();
             await waitForStatus(task.id, ['running']);
-            await Bun.sleep(100);
+            const deadline = Date.now() + 3_000;
+            while (settlementAttempts === 0 && Date.now() < deadline) await Bun.sleep(10);
+            expect(settlementAttempts).toBeGreaterThan(0);
             expect(unhandled).toEqual([]);
             expect(worker.getRunningCount()).toBe(1);
             expect((await TaskRunService.getRunningRunByTaskId(task.id))?.status).toBe('running');

@@ -1,4 +1,6 @@
 import { spawn } from 'child_process';
+import { OpenCode } from '@opencode-ai/client';
+import { Service } from '@opencode-ai/client/service';
 import { validateTaskWorkingDirectory } from './task-working-directory';
 
 const CATALOG_CACHE_MS = 30_000;
@@ -211,6 +213,47 @@ export function parseOpenCodeAgents(output: string): OpenCodeAgentOption[] {
         || left.name.localeCompare(right.name));
 }
 
+async function loadOpenCodeV2Catalog(
+    cwd: string,
+    executable: string,
+    timeoutMs: number,
+): Promise<OpenCodeCatalog> {
+    const endpoint = await Service.ensure({ command: [executable, 'serve', '--service'] });
+    const client = OpenCode.make({
+        baseUrl: endpoint.url,
+        headers: Service.headers(endpoint),
+    });
+    const request = { location: { directory: cwd } };
+    const signal = AbortSignal.timeout(timeoutMs);
+    const modelsResponse = await client.model.list(request, { signal });
+
+    let agentsResponse = await client.agent.list(request, { signal });
+    for (let attempt = 0; agentsResponse.data.length === 0 && attempt < 2; attempt += 1) {
+        await Bun.sleep(250);
+        agentsResponse = await client.agent.list(request, { signal });
+    }
+
+    const variantsByModel: Record<string, string[]> = {};
+    const models = modelsResponse.data
+        .filter((model) => model.enabled)
+        .map((model) => {
+            const id = `${model.providerID}/${model.modelID}`;
+            variantsByModel[id] = model.variants.map((variant) => variant.id)
+                .sort((left, right) => left.localeCompare(right));
+            return id;
+        })
+        .sort((left, right) => left.localeCompare(right));
+    const agents = agentsResponse.data
+        .filter((agent) => !agent.hidden && agent.mode !== 'subagent' && agent.id !== 'supertask-runner')
+        .map((agent) => ({ name: agent.id, mode: agent.mode }))
+        .sort((left, right) => left.mode.localeCompare(right.mode)
+            || left.name.localeCompare(right.name));
+
+    if (models.length === 0) throw new Error('OpenCode 没有返回可用模型');
+    if (agents.length === 0) throw new Error('OpenCode 没有返回可直接运行的主 Agent');
+    return { cwd, models: [...new Set(models)], variantsByModel, agents };
+}
+
 export async function loadOpenCodeCatalog(
     cwd: string,
     options: CatalogOptions = {},
@@ -224,24 +267,27 @@ export async function loadOpenCodeCatalog(
         return cached.result;
     }
 
-    const result = Promise.all([
-        runOpenCode(executable, ['models', '--verbose'], cwd, timeoutMs)
-            .catch((error: unknown) => {
-                if (!(error instanceof OpenCodeCommandExitError)) throw error;
-                return runOpenCode(executable, ['models'], cwd, timeoutMs);
-            }),
-        runOpenCode(executable, ['agent', 'list'], cwd, timeoutMs),
-    ]).then(([modelsOutput, agentsOutput]) => {
-        const metadata = parseOpenCodeModelMetadata(modelsOutput);
-        const models = metadata.models.length > 0
-            ? metadata.models
-            : parseOpenCodeModels(modelsOutput);
-        const agents = parseOpenCodeAgents(agentsOutput)
-            .filter((agent) => agent.mode !== 'subagent');
-        if (models.length === 0) throw new Error('OpenCode 没有返回可用模型');
-        if (agents.length === 0) throw new Error('OpenCode 没有返回可直接运行的主 Agent');
-        return { cwd, models, variantsByModel: metadata.variantsByModel, agents };
-    });
+    const legacyCatalog = () => Promise.all([
+            runOpenCode(executable, ['models', '--verbose'], cwd, timeoutMs)
+                .catch((error: unknown) => {
+                    if (!(error instanceof OpenCodeCommandExitError)) throw error;
+                    return runOpenCode(executable, ['models'], cwd, timeoutMs);
+                }),
+            runOpenCode(executable, ['agent', 'list'], cwd, timeoutMs),
+        ]).then(([modelsOutput, agentsOutput]) => {
+            const metadata = parseOpenCodeModelMetadata(modelsOutput);
+            const models = metadata.models.length > 0
+                ? metadata.models
+                : parseOpenCodeModels(modelsOutput);
+            const agents = parseOpenCodeAgents(agentsOutput)
+                .filter((agent) => agent.mode !== 'subagent');
+            if (models.length === 0) throw new Error('OpenCode 没有返回可用模型');
+            if (agents.length === 0) throw new Error('OpenCode 没有返回可直接运行的主 Agent');
+            return { cwd, models, variantsByModel: metadata.variantsByModel, agents };
+        });
+    const result = /(?:^|\/)opencode2$/.test(executable)
+        ? loadOpenCodeV2Catalog(cwd, executable, timeoutMs).catch(legacyCatalog)
+        : legacyCatalog();
 
     if (options.useCache !== false) {
         catalogCache.set(cacheKey, { expiresAt: Date.now() + CATALOG_CACHE_MS, result });

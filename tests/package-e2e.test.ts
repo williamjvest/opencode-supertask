@@ -228,6 +228,7 @@ describe('构建产物端到端', () => {
             'add',
             '--name', '构建产物重试任务',
             '--agent', 'test-agent',
+            '--model', 'openai/test-model',
             '--variant', 'high',
             '--prompt', '验证失败后自动重试',
             '--max-retries', '1',
@@ -318,11 +319,11 @@ describe('构建产物端到端', () => {
         }
         expect(invocations.find((args) => args.at(-1) === '验证普通队列执行')).toEqual([
             'run', '--agent', 'test-agent', '--format', 'json',
-            '-m', 'openai/test-model', '--variant', 'xhigh', '验证普通队列执行',
+            '-m', 'openai/test-model#xhigh', '验证普通队列执行',
         ]);
         expect(invocations.find((args) => args.at(-1) === '验证 Gateway 独立调度')).toEqual([
             'run', '--agent', 'test-agent', '--format', 'json',
-            '-m', 'openai/test-model', '--variant', 'high', '验证 Gateway 独立调度',
+            '-m', 'openai/test-model#high', '验证 Gateway 独立调度',
         ]);
 
         const finalHealth = await fetch(`http://127.0.0.1:${dashboardPort}/health`);

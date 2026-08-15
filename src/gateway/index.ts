@@ -130,7 +130,11 @@ function markGatewayNotReady() {
     } catch {}
 }
 
+let started = false;
+
 async function main() {
+    if (started) return;
+    started = true;
     console.log(JSON.stringify({ ts: new Date().toISOString(), level: 'info', msg: 'SuperTask Gateway starting', pid: process.pid }));
 
     assertWorkerProcessIsolationSupported();

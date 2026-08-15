@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Ported the plugin to OpenCode 2's `Plugin.define`, session context hook, and tool transform APIs.
+- The Worker now passes variants as `provider/model#variant`, and the Dashboard reads project-scoped Agent/model catalogs through the OpenCode 2 client.
+- Fixed bundled `supertask gateway` startup so the CLI and `import.meta.main` paths cannot start two Gateway instances.
+- Made the asynchronous settlement failure test wait for settlement to begin instead of racing worker shutdown.
+
 All notable user-facing changes are recorded here. This project follows semantic versioning while it is in the `0.x` development series.
 
 ## [0.1.41] - 2026-07-19

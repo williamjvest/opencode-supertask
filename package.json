@@ -60,15 +60,17 @@
     },
     "homepage": "https://github.com/vbgate/opencode-supertask#readme",
     "dependencies": {
+        "@opencode-ai/client": "0.0.0-next-17444",
         "commander": "^13.1.0",
         "cron-parser": "^5.5.0",
         "drizzle-orm": "^0.39.1",
         "glob": "^13.0.0",
-        "hono": "^4.7.4"
+        "hono": "^4.7.4",
+        "zod": "^4.1.8"
     },
     "devDependencies": {
         "@eslint/js": "^10.0.1",
-        "@opencode-ai/plugin": "^1.1.42",
+        "@opencode-ai/plugin": "0.0.0-next-17444",
         "@playwright/test": "^1.61.1",
         "@types/bun": "latest",
         "@types/node": "^25.1.0",
@@ -79,7 +81,7 @@
         "typescript-eslint": "^8.64.0"
     },
     "peerDependencies": {
-        "@opencode-ai/plugin": "^1.1.0"
+        "@opencode-ai/plugin": "0.0.0-next-17444"
     },
     "peerDependenciesMeta": {
         "@opencode-ai/plugin": {

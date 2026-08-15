@@ -17,7 +17,7 @@ Gateway ─ Worker + Scheduler + Watchdog + Dashboard
 ```
 
 - 插件在 `plugin/supertask.ts` 注册 8 个 `supertask_*` 工具：`add/next/status/retry/list/get/schedule/upgrade`；运行态与执行终态只允许 Gateway 写入，不得恢复外部 `start/done/fail`。
-- Worker 先启动等待握手的 launcher，持久化 launcher PID 后才通过参数数组执行 `opencode run --agent <task.agent> --format json [-m <model>] [--variant <variant>] <task.prompt>`；新 run 使用 `gated-v3-token-guardian`，每 run UUID 必须同时写入 `task_runs.locked_by` 和 launcher argv。launcher 只能在整个受管进程组排空后通过不传递给 OpenCode 的 IPC 发回绑定 UUID 的证明；无证明退出必须隔离，不得结算或释放批次。退出码决定成功或失败，Gateway 统一写任务状态和执行记录。Unix 独立进程组只能证明仍属于该组的进程排空，不得描述为任意后代的整树退出证明；主动调用 `setsid()` 或以 detached/daemon 方式离组的进程必须自行管理。Windows 在引入 Job Object 前必须拒绝启动 Worker，不得退回不完整的父子 PID 扫描。
+- Worker 先启动等待握手的 launcher，持久化 launcher PID 后才通过参数数组执行 `opencode2 run --agent <task.agent> --format json [-m <model>[#<variant>]] <task.prompt>`；新 run 使用 `gated-v3-token-guardian`，每 run UUID 必须同时写入 `task_runs.locked_by` 和 launcher argv。launcher 只能在整个受管进程组排空后通过不传递给 OpenCode 的 IPC 发回绑定 UUID 的证明；无证明退出必须隔离，不得结算或释放批次。退出码决定成功或失败，Gateway 统一写任务状态和执行记录。Unix 独立进程组只能证明仍属于该组的进程排空，不得描述为任意后代的整树退出证明；主动调用 `setsid()` 或以 detached/daemon 方式离组的进程必须自行管理。Windows 在引入 Job Object 前必须拒绝启动 Worker，不得退回不完整的父子 PID 扫描。
 - Worker 校验 drain proof 后必须通过同一 IPC 回送绑定 UUID 的确认，launcher 收件后才退出；不得依赖旧 Bun 不可靠的 `process.send` callback。最低支持 Bun 1.1.45，CI 必须用该版本真实执行构建后的 launcher IPC smoke test。
 - 进程组排空后的结算失败不得立即释放内存所有权或丢失已知退出结果；Gateway 存活时必须保持任务、批次和心跳并重试，停机时也必须用完整 shutdown grace 继续结算，只有宽限期耗尽后才可停止持有并交给 Watchdog。
 - Worker 启动的受管 OpenCode 进程设置 `SUPERTASK_MANAGED_RUN=1`；该上下文必须拒绝 `supertask_upgrade`，避免升级流程删除并等待承载自己的 Gateway。升级只能从外部 CLI 或非队列 OpenCode 会话发起。

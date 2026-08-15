@@ -157,7 +157,7 @@ The responsive Dashboard supports English and Chinese, light and dark themes, an
 | Execution Logs | Read structured output, tools, errors, sessions, and the exact historical command |
 | System Status | Inspect active configuration, health, concurrency, and backup-first database maintenance |
 
-The project picker reads the selected directory's real `opencode agent list` and `opencode models --verbose` output, so forms offer only locally available models, each model's declared variants, and directly runnable Agents. Leaving variant at its default omits `--variant` and follows the Agent/model configuration.
+The project picker reads the selected directory's Agent and model catalogs through the OpenCode 2 client, so forms offer only locally available models, each model's declared variants, and directly runnable Agents. A non-default variant is passed as `model#variant`; leaving it at default follows the Agent/model configuration.
 
 ## Reliability Without Hand-Waving
 

@@ -157,7 +157,7 @@ supertask cancel --id 42
 | 执行记录 | 查看结构化输出、工具、错误、Session 和历史真实命令 |
 | 系统状态 | 检查生效配置、健康状态、并发，以及先备份后维护数据库 |
 
-项目选择器会读取目标目录真实的 `opencode agent list` 和 `opencode models --verbose`，表单只展示本机可用模型、各模型声明的 variants 和可以直接运行的 Agent。variant 留在默认值时不会传 `--variant`，继续跟随 Agent/模型配置。
+项目选择器会通过 OpenCode 2 Client 按目标目录读取 Agent 和模型目录，表单只展示本机可用模型、各模型声明的 variants 和可以直接运行的 Agent。非默认 variant 会按 `model#variant` 传递；留在默认值时继续跟随 Agent/模型配置。
 
 ## 可靠不是一句口号
 

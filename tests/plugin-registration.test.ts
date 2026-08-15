@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
-import { shouldAttemptGatewayReplacement, SuperTaskPlugin } from '../plugin/supertask';
+import SuperTaskPlugin, { shouldAttemptGatewayReplacement, SuperTaskTools } from '../plugin/supertask';
 import { setupTestDb } from './helpers/mock-db';
 import { TaskService } from '../src/core/services/task.service';
 import { MANAGED_RUN_ENV, MANAGED_RUN_ENV_VALUE } from '../src/core/launch-protocol';
@@ -9,6 +9,41 @@ const originalPm2Bin = process.env.SUPERTASK_PM2_BIN;
 interface RuntimeSchema {
     description?: string;
     safeParse(value: unknown): { success: boolean };
+}
+
+interface RegisteredTool {
+    name: string;
+    description: string;
+    input: Record<string, unknown>;
+    execute(args: unknown, context: { sessionID: string }): Promise<{ content?: string }>;
+}
+
+async function setupPlugin(directory = process.cwd()) {
+    const registered = new Map<string, RegisteredTool>();
+    const hooks: {
+        system?: (session: { system: Array<{ type: string; text: string }> }) => void;
+    } = {};
+    const context = {
+        session: {
+            async hook(name: string, hook: unknown) {
+                if (name === 'context') {
+                    hooks.system = hook as typeof hooks.system;
+                }
+            },
+            async get() {
+                return { location: { directory } };
+            },
+        },
+        tool: {
+            async transform(callback: unknown) {
+                const transform = callback as (draft: { add(tool: RegisteredTool): void }) => void;
+                transform({ add: (tool) => registered.set(tool.name, tool) });
+            },
+        },
+    } as unknown as Parameters<typeof SuperTaskPlugin.setup>[0];
+
+    await SuperTaskPlugin.setup(context);
+    return { registered, hooks };
 }
 
 describe('OpenCode 插件注册', () => {
@@ -23,8 +58,8 @@ describe('OpenCode 插件注册', () => {
     });
 
     test('只注册不会绕过 Gateway 执行所有权的 8 个工具并注入系统说明', async () => {
-        const hooks = await SuperTaskPlugin({} as Parameters<typeof SuperTaskPlugin>[0]);
-        expect(Object.keys(hooks.tool ?? {}).sort()).toEqual([
+        const { registered, hooks } = await setupPlugin();
+        expect([...registered.keys()].sort()).toEqual([
             'supertask_add',
             'supertask_get',
             'supertask_list',
@@ -35,20 +70,18 @@ describe('OpenCode 插件注册', () => {
             'supertask_upgrade',
         ]);
 
-        const output = { system: [] as string[] };
-        await hooks['experimental.chat.system.transform']?.(
-            {} as Parameters<NonNullable<typeof hooks['experimental.chat.system.transform']>>[0],
-            output,
-        );
+        const output = { system: [] as Array<{ type: string; text: string }> };
+        if (!hooks.system) throw new Error('系统提示 hook 未注册');
+        hooks.system(output);
         expect(output.system).toHaveLength(1);
-        expect(output.system[0]).toContain('supertask_schedule');
-        expect(output.system[0]).toContain('所有具有相同非空 `batchId` 的任务也不会同时执行');
-        expect(output.system[0]).toContain('即使任务属于不同项目目录');
-        expect(output.system[0]).toContain('`globalBatch.activeRunning`');
-        expect(output.system[0]).toContain('若任务 B 必须等待任务 A 完成');
+        expect(output.system[0].text).toContain('supertask_schedule');
+        expect(output.system[0].text).toContain('所有具有相同非空 `batchId` 的任务也不会同时执行');
+        expect(output.system[0].text).toContain('即使任务属于不同项目目录');
+        expect(output.system[0].text).toContain('`globalBatch.activeRunning`');
+        expect(output.system[0].text).toContain('若任务 B 必须等待任务 A 完成');
 
-        const add = hooks.tool?.supertask_add;
-        const schedule = hooks.tool?.supertask_schedule;
+        const add = SuperTaskTools.supertask_add;
+        const schedule = SuperTaskTools.supertask_schedule;
         if (!add || !schedule) throw new Error('任务创建工具未注册');
         const addArgs = add.args as unknown as { batchId: RuntimeSchema; variant: RuntimeSchema };
         const scheduleArgs = schedule.args as unknown as {
@@ -79,8 +112,7 @@ describe('OpenCode 插件注册', () => {
         });
         await TaskService.start(otherProjectTask.id);
 
-        const hooks = await SuperTaskPlugin({} as Parameters<typeof SuperTaskPlugin>[0]);
-        const status = hooks.tool?.supertask_status;
+        const status = SuperTaskTools.supertask_status;
         if (!status) throw new Error('supertask_status 未注册');
         const result = JSON.parse(await status.execute(
             { batchId: 'shared-batch' },
@@ -110,8 +142,7 @@ describe('OpenCode 插件注册', () => {
     });
 
     test('任务作用域使用 OpenCode 工具上下文目录，忽略调用者伪造的 cwd', async () => {
-        const hooks = await SuperTaskPlugin({} as Parameters<typeof SuperTaskPlugin>[0]);
-        const add = hooks.tool?.supertask_add;
+        const add = SuperTaskTools.supertask_add;
         if (!add) throw new Error('supertask_add 未注册');
         const context = {
             directory: process.cwd(),
@@ -137,8 +168,7 @@ describe('OpenCode 插件注册', () => {
         const originalManagedRun = process.env[MANAGED_RUN_ENV];
         process.env[MANAGED_RUN_ENV] = MANAGED_RUN_ENV_VALUE;
         try {
-            const hooks = await SuperTaskPlugin({} as Parameters<typeof SuperTaskPlugin>[0]);
-            const upgrade = hooks.tool?.supertask_upgrade;
+            const upgrade = SuperTaskTools.supertask_upgrade;
             if (!upgrade) throw new Error('supertask_upgrade 未注册');
 
             const output = JSON.parse(await upgrade.execute(

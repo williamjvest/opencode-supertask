@@ -6,7 +6,8 @@
  * [定位]: 通过 supertask_* 工具管理 AI Agent 任务队列
  */
 
-import { type Plugin, tool } from "@opencode-ai/plugin";
+import { Plugin } from "@opencode-ai/plugin";
+import { z } from "zod";
 import { TaskService } from "@core/services/task.service";
 import { TaskTemplateService } from "@core/services/task-template.service";
 import { getDb, sqlite } from "@core/db";
@@ -25,6 +26,24 @@ import {
 
 let _initialized = false;
 let _writeBlockedReason: string | null = null;
+
+interface LegacyToolContext {
+    directory: string;
+}
+
+interface LegacyToolDefinition<Args extends z.ZodRawShape> {
+    description: string;
+    args: Args;
+    execute(
+        args: z.infer<z.ZodObject<Args>>,
+        context: LegacyToolContext,
+    ): Promise<string>;
+}
+
+const tool = Object.assign(
+    <Args extends z.ZodRawShape>(definition: LegacyToolDefinition<Args>) => definition,
+    { schema: z },
+);
 
 function readyGatewayVersion(): { fresh: boolean; version: string | null } {
     const lockRow = sqlite.prepare(
@@ -133,17 +152,7 @@ const SYSTEM_INSTRUCTION = `
 - \`max_instances\` 只限制自动调度产生的活跃实例（排队、运行中、等待重试）；手动“立即运行一次”始终创建任务并加入队列
 `;
 
-export const SuperTaskPlugin: Plugin = async () => {
-    return {
-        async config() {
-            ensureInit();
-        },
-
-        async "experimental.chat.system.transform"(input, output) {
-            output.system.push(SYSTEM_INSTRUCTION);
-        },
-
-        tool: {
+export const SuperTaskTools = {
             // 创建任务
             supertask_add: tool({
                 description:
@@ -561,6 +570,45 @@ export const SuperTaskPlugin: Plugin = async () => {
                     }
                 },
             }),
-        },
-    };
 };
+
+export default Plugin.define({
+    id: "supertask",
+    async setup(context) {
+        ensureInit();
+
+        await context.session.hook("context", (session) => {
+            session.system.push({ type: "text", text: SYSTEM_INSTRUCTION });
+        });
+
+        await context.tool.transform((tools) => {
+            const register = <Args extends z.ZodRawShape>(
+                name: string,
+                definition: LegacyToolDefinition<Args>,
+            ) => {
+                const inputSchema = z.object(definition.args);
+                tools.add({
+                    name,
+                    description: definition.description,
+                    input: z.toJSONSchema(inputSchema),
+                    async execute(args, toolContext) {
+                        const session = await context.session.get({ sessionID: toolContext.sessionID });
+                        const content = await definition.execute(inputSchema.parse(args), {
+                            directory: session.location.directory,
+                        });
+                        return { content };
+                    },
+                });
+            };
+
+            register("supertask_add", SuperTaskTools.supertask_add);
+            register("supertask_next", SuperTaskTools.supertask_next);
+            register("supertask_status", SuperTaskTools.supertask_status);
+            register("supertask_retry", SuperTaskTools.supertask_retry);
+            register("supertask_list", SuperTaskTools.supertask_list);
+            register("supertask_get", SuperTaskTools.supertask_get);
+            register("supertask_schedule", SuperTaskTools.supertask_schedule);
+            register("supertask_upgrade", SuperTaskTools.supertask_upgrade);
+        });
+    },
+});

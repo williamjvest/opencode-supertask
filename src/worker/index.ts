@@ -297,9 +297,11 @@ export class WorkerEngine {
     private async spawnTask(task: Task, runId: number, launchIdentity: string): Promise<void> {
         const model = this.resolveModel(task.model);
         const variant = this.resolveVariant(task.variant);
+        if (variant && !model) {
+            throw new Error('OpenCode 2 任务设置 variant 时必须同时设置显式 model');
+        }
         const args = ['run', '--agent', task.agent, '--format', 'json'];
-        if (model) args.push('-m', model);
-        if (variant) args.push('--variant', variant);
+        if (model) args.push('-m', variant ? `${model}#${variant}` : model);
         args.push(task.prompt);
         const cwd = task.cwd || process.cwd();
 
