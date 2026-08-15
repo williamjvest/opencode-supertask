@@ -479,7 +479,7 @@ describe('Dashboard 安全边界', () => {
         );
         expect(commandResponse.status).toBe(200);
         expect(await commandResponse.json()).toEqual({
-            command: 'opencode --session ses_abc123XYZ',
+            command: 'opencode2 --session ses_abc123XYZ',
         });
     });
 

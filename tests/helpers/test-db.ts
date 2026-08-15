@@ -63,7 +63,13 @@ export function createTestDb() {
             heartbeat_at INTEGER,
             worker_pid INTEGER,
             child_pid INTEGER,
-            launch_protocol TEXT
+            launch_protocol TEXT,
+            handoff_message TEXT,
+            handoff_requested_at INTEGER,
+            herdr_workspace_id TEXT,
+            herdr_tab_id TEXT,
+            herdr_pane_id TEXT,
+            handoff_error TEXT
         );
     `);
 

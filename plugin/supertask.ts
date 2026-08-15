@@ -14,6 +14,7 @@ import { getDb, sqlite } from "@core/db";
 import { parseDuration } from "@core/duration";
 import { compareSemanticVersions } from "@core/semver";
 import { MANAGED_RUN_ENV, MANAGED_RUN_ENV_VALUE } from "@core/launch-protocol";
+import { encodeHandoffMarker } from "@core/handoff-protocol";
 import { ensureGateway, getGatewayDiagnostic, getPackageVersion, upgrade as pm2Upgrade } from "../src/daemon/pm2";
 import {
     getGlobalCliDiagnostic,
@@ -150,9 +151,25 @@ const SYSTEM_INSTRUCTION = `
 - \`recurring\`: 固定间隔循环（如每 6 小时）
 - \`delayed\`: 一次性定时执行
 - \`max_instances\` 只限制自动调度产生的活跃实例（排队、运行中、等待重试）；手动“立即运行一次”始终创建任务并加入队列
+
+### 需要 Will 输入时
+
+- 只有在没有 Will 的判断、批准、凭据输入或其他人工动作就无法继续时，调用 \`supertask_handoff\`
+- message 必须写清楚已经完成了什么、卡在哪里、Will 需要做什么；调用后停止工作，不要把任务标记为完成
+- 不要用 handoff 代替正常的自主决策，也不要因普通失败调用它
 `;
 
 export const SuperTaskTools = {
+            supertask_handoff: tool({
+                description: "暂停当前受管任务并把同一个 OpenCode 会话交给 Will。仅在确实需要人工判断、批准、凭据输入或动作时调用；message 必须是可直接行动的请求。",
+                args: {
+                    message: tool.schema.string().trim().min(1).max(4000).describe("给 Will 的明确交接说明：已完成内容、阻塞点、下一步需要他做什么"),
+                },
+                async execute(args) {
+                    return encodeHandoffMarker(args.message);
+                },
+            }),
+
             // 创建任务
             supertask_add: tool({
                 description:
@@ -324,7 +341,7 @@ export const SuperTaskTools = {
                 description: "列出最近的任务。支持按状态筛选，按创建时间倒序。",
                 args: {
                     status: tool.schema
-                        .enum(["pending", "running", "done", "failed", "dead_letter", "cancelled"])
+                        .enum(["pending", "running", "awaiting_input", "done", "failed", "dead_letter", "cancelled"])
                         .optional()
                         .describe("按状态筛选"),
                     limit: tool.schema.number().int().min(1).max(1000).optional().describe("返回数量，默认 20"),
@@ -589,6 +606,7 @@ export default Plugin.define({
                 const inputSchema = z.object(definition.args);
                 tools.add({
                     name,
+                    ...(name === "supertask_handoff" ? { options: { codemode: false } } : {}),
                     description: definition.description,
                     input: z.toJSONSchema(inputSchema),
                     async execute(args, toolContext) {
@@ -602,6 +620,7 @@ export default Plugin.define({
             };
 
             register("supertask_add", SuperTaskTools.supertask_add);
+            register("supertask_handoff", SuperTaskTools.supertask_handoff);
             register("supertask_next", SuperTaskTools.supertask_next);
             register("supertask_status", SuperTaskTools.supertask_status);
             register("supertask_retry", SuperTaskTools.supertask_retry);

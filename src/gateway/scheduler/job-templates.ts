@@ -53,7 +53,7 @@ function createTaskFromTemplate(
                 .from(schema.tasks)
                 .where(and(
                     eq(schema.tasks.templateId, templateId),
-                    sql`${schema.tasks.status} IN ('pending', 'running')`,
+                    sql`${schema.tasks.status} IN ('pending', 'running', 'awaiting_input')`,
                 ))
                 .get();
             const retryableTasks = tx
@@ -73,7 +73,7 @@ function createTaskFromTemplate(
                     eq(schema.taskRuns.status, 'running'),
                     eq(schema.tasks.templateId, templateId),
                     sql`NOT (
-                        ${schema.tasks.status} IN ('pending', 'running')
+                        ${schema.tasks.status} IN ('pending', 'running', 'awaiting_input')
                         OR (
                             ${schema.tasks.status} = 'failed'
                             AND ${schema.tasks.retryCount} <= ${schema.tasks.maxRetries}

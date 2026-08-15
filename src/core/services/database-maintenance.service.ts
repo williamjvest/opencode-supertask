@@ -243,11 +243,11 @@ export class DatabaseMaintenanceService {
                 const restorePlan = this.buildRestorePlan(sqlite);
                 recoveredRunningTasks = this.scalar(
                     sqlite,
-                    "SELECT COUNT(*) AS count FROM restore_source.tasks WHERE status = 'running'",
+                    "SELECT COUNT(*) AS count FROM restore_source.tasks WHERE status IN ('running', 'awaiting_input')",
                 );
                 closedRunningRuns = this.scalar(
                     sqlite,
-                    "SELECT COUNT(*) AS count FROM restore_source.task_runs WHERE status = 'running'",
+                    "SELECT COUNT(*) AS count FROM restore_source.task_runs WHERE status IN ('running', 'awaiting_input')",
                 );
 
                 sqlite.exec('PRAGMA defer_foreign_keys = ON');
@@ -288,12 +288,12 @@ export class DatabaseMaintenanceService {
                             WHEN log IS NULL OR log = '' THEN '数据库恢复时关闭遗留运行记录'
                             ELSE log || '\n数据库恢复时关闭遗留运行记录'
                         END
-                    WHERE status = 'running'
+                    WHERE status IN ('running', 'awaiting_input')
                 `).run(finishedAt);
                 sqlite.exec(`
                     UPDATE tasks
                     SET status = 'pending', started_at = NULL, finished_at = NULL
-                    WHERE status = 'running'
+                    WHERE status IN ('running', 'awaiting_input')
                 `);
                 sqlite.exec('DELETE FROM gateway_lock');
 
@@ -466,10 +466,10 @@ export class DatabaseMaintenanceService {
             : { tasks: 0, taskRuns: 0, taskTemplates: 0 };
         const runningTasks = missingTables.includes('tasks')
             ? 0
-            : this.scalar(sqlite, "SELECT COUNT(*) AS count FROM tasks WHERE status = 'running'");
+            : this.scalar(sqlite, "SELECT COUNT(*) AS count FROM tasks WHERE status IN ('running', 'awaiting_input')");
         const runningRuns = missingTables.includes('task_runs')
             ? 0
-            : this.scalar(sqlite, "SELECT COUNT(*) AS count FROM task_runs WHERE status = 'running'");
+            : this.scalar(sqlite, "SELECT COUNT(*) AS count FROM task_runs WHERE status IN ('running', 'awaiting_input')");
         const sizeBytes = path === ':memory:' || !existsSync(path) ? sqlite.serialize().byteLength : statSync(path).size;
 
         return {
@@ -553,11 +553,11 @@ export class DatabaseMaintenanceService {
     }
 
     private static assertNoRunningWork(sqlite: Database): void {
-        const runningTasks = this.scalar(sqlite, "SELECT COUNT(*) AS count FROM tasks WHERE status = 'running'");
-        const runningRuns = this.scalar(sqlite, "SELECT COUNT(*) AS count FROM task_runs WHERE status = 'running'");
+        const runningTasks = this.scalar(sqlite, "SELECT COUNT(*) AS count FROM tasks WHERE status IN ('running', 'awaiting_input')");
+        const runningRuns = this.scalar(sqlite, "SELECT COUNT(*) AS count FROM task_runs WHERE status IN ('running', 'awaiting_input')");
         if (runningTasks > 0 || runningRuns > 0) {
             throw new DatabaseMaintenanceConflictError(
-                `存在运行中任务（tasks=${runningTasks}, task_runs=${runningRuns}），已拒绝危险操作`,
+                `存在运行中或等待人工输入的任务（tasks=${runningTasks}, task_runs=${runningRuns}），已拒绝危险操作`,
             );
         }
     }

@@ -110,7 +110,12 @@ CLI 帮助、`doctor` 和数据库维护的交互式摘要支持 `auto | zh-CN |
 | `watchdog.cleanupIntervalMs` | `86400000` | 60000–604800000 ms |
 | `watchdog.retentionDays` | `30` | 1–3650 天 |
 | `dashboard.enabled` | `true` | 是否随 Gateway 启动 |
-| `dashboard.port` | `4680` | 1–65535，仅绑定 `127.0.0.1` |
+| `dashboard.host` | `127.0.0.1` | 监听地址，同时作为允许的 Host/Origin；非回环值只应用于受信私网 |
+| `dashboard.port` | `4680` | 1–65535 |
+| `handoff.enabled` | `false` | 是否允许受管任务把同一 OpenCode 会话交给 Herdr |
+| `handoff.herdrBin` | `herdr` | Herdr CLI 可执行文件 |
+| `handoff.workspaceLabel` | `Scheduled Handoffs` | 持久交接标签页所在工作区；不存在时自动创建 |
+| `handoff.opencodeBin` | `opencode2` | Herdr 标签页中恢复会话的 OpenCode 2 可执行文件 |
 
 建议以完整配置开始：
 
@@ -180,7 +185,7 @@ Dashboard 的“定时任务”页可以直接创建和编辑 `cron`、固定间
 
 新建任务或定时任务时，先用 Dashboard 的文件夹选择器确定项目。Gateway 会通过 OpenCode 2 Client 按该目录读取 Agent 和模型目录：Agent 下拉框只保留 primary/all 模式，避免把仅供委派的 subagent 直接传给 `opencode2 run`；模型先选 Provider 再选具体值，随后只显示该模型元数据声明的 variants。选“跟随 Agent / OpenCode 默认模型”时 Worker 不传 `-m`；variant 非默认值时合并为 `model#variant`。CLI 和插件仍允许 Provider 自定义 variant 字符串，最终由实际执行的 OpenCode 判定。读取失败会在表单中显示原因，不使用伪造的静态列表。
 
-任务页和执行记录页的“继续会话”会从服务端按 run ID 读取已捕获的 Session ID，校验格式后复制 `opencode --session <sessionId>`；完整 Session ID 不写入页面 HTML。界面中的“等待重试”对应内部 `failed`，仍会按退避策略自动执行；“已停止”对应内部 `dead_letter`，可能是重试用尽或依赖无法继续，系统不会再自动运行，需要查看失败原因后手动重试。
+任务页和执行记录页的“继续会话”会从服务端按 run ID 读取已捕获的 Session ID，校验格式后复制 `opencode2 --session <sessionId>`；完整 Session ID 不写入页面 HTML。启用 Herdr 交接后，受管 Agent 只有在确实无法继续时才调用 `supertask_handoff`：Worker 等待原 headless 进程组排空，将 task/run 原子改为 `awaiting_input`，在任务 `cwd` 创建持久 Herdr 标签页，并用同一 Session ID 启动 OpenCode 2 TUI。该状态不占 Worker 并发，但继续占用模板 `maxInstances`、批次锁和依赖；TUI 正常退出后任务完成，异常退出则保留等待态和错误以便重新打开。界面中的“等待重试”对应内部 `failed`，仍会按退避策略自动执行；“已停止”对应内部 `dead_letter`，可能是重试用尽或依赖无法继续，系统不会再自动运行，需要查看失败原因后手动重试。
 
 定时任务的 `maxInstances` 只限制自动调度，统计它产生的 `pending`、`running` 和仍有自动重试预算的 `failed`。Dashboard 的“立即运行一次”始终按当前模板创建普通 `pending` 任务；若 Worker 全局并发已满，它会留在队列等待。手动创建的任务仍计入后续自动调度的活跃实例数。不会回放离线期间错过的每个周期。
 
@@ -203,7 +208,7 @@ curl -fsS http://127.0.0.1:4680/health
 - 普通 `doctor` 不调用模型；`--smoke` 才会以当前目录（或 `--smoke-cwd`）创建一个 `maxRetries=0` 的真实高优先级任务，通过 Gateway、Worker、launcher 和 OpenCode 完整链路执行，并检查返回标记。它会在数据库中保留任务/run 作为审计证据。
 - `/health` 可访问说明 Gateway 的 HTTP、数据库锁及内部循环正常；如果禁用了 Dashboard，此信号不适用，PM2 管理仍使用 ready 锁判断。
 - Dashboard 顶栏可切换中文/English 和跟随系统/浅色/深色主题。语言写入当前站点 Cookie，主题写入浏览器本地存储；它们只影响当前浏览器显示，不修改 Gateway 配置。
-- Dashboard 只接受 Host 为 `localhost`、`127.0.0.1` 或 `[::1]` 的请求；不要用自定义域名、反向代理或端口转发暴露页面。系统页和重启状态所需的 PM2/systemd 探测在独立 Bun runner 中异步执行并短时缓存，慢诊断不会暂停任务调度和锁心跳。
+- Dashboard 默认只接受 `localhost`、`127.0.0.1` 或 `[::1]`；显式配置 `dashboard.host` 时，该单一主机名也进入严格 Host/同源校验。不要把它暴露到不可信网络。系统页和重启状态所需的 PM2/systemd 探测在独立 Bun runner 中异步执行并短时缓存，慢诊断不会暂停任务调度和锁心跳。
 - 新 run 的日志首行保存 Worker 真正执行的 executable、args 和 `cwd`。执行记录页在被点击的 run 下方展开可复制的 `cd <cwd> && opencode run ...`，并分层展示 Agent 文本、错误和工具；原始 JSONL 收在二级折叠入口。任务、定时任务和执行详情默认展示人类可读字段，原始 JSON 只在折叠区保留。旧 run 不会补造命令，仍可查看原始日志。
 - 新 run 使用 `gated-v3-token-guardian`，每 run UUID 会同时写入 `task_runs.locked_by` 和 launcher argv。Watchdog 只有在 launcher、OpenCode 参数与 UUID 全部匹配时才终止进程组；Worker 仅在收到 launcher 通过独立 IPC 返回的同 UUID 排空证明后才结算正常退出。guardian 无证明退出会保持 run 和批次隔离，进程组明确消失后才作失败收敛。旧 v2/legacy 记录的 PID 或 PGID 仍存活、被复用或无法确认时只隔离且不发信号，只有二者都明确消失才恢复。无法确认子进程退出时 `/health` 会降级；旧版 `started_at`/`heartbeat_at` 同时缺失的运行记录也会立即进入诊断隔离。
 - drain proof 使用双向确认：Worker 校验同 UUID 证明后回送确认，launcher 收件后才退出，不再依赖旧 Bun 不可靠的 `process.send` callback。
@@ -293,7 +298,7 @@ supertask db clear --confirm CLEAR
 
 `db clear` 会先核对 PM2 进程 PID 与当前数据库的新鲜 ready 锁；匹配时自动优雅停止 Gateway，维护结束后按原状态重启并等待新的 ready 锁，数据库操作失败时也会尝试恢复运行。传入 `--keep-stopped` 会让原本运行的 PM2 Gateway 保持停止。前台 Gateway、陈旧锁或无法确认归属的进程不会被自动终止，命令会拒绝操作并要求人工停止。
 
-清空仍会拒绝任何 `running` 任务/执行记录，在一个 `BEGIN IMMEDIATE` 事务内先生成 `pre-clear` 备份，再动态删除全部业务表数据；这包括由兼容新版本引入、当前旧二进制并不认识的 expand-only 表，循环外键在提交时统一校验。任一步失败都会回滚事务。它保留数据库结构、`gateway_lock`、迁移记录、配置和自增序列。若数据库维护已完成但 PM2 重启失败，CLI 会明确报告“数据库维护已完成”，此时按错误提示检查 `pm2 logs supertask-gateway`，不要重复清空。Dashboard 的“清空数据库”复用同一服务，要求服务端确认并拒绝运行中任务；因为 Dashboard 本身位于当前 Gateway 内，它只豁免当前 Gateway PID，不豁免其他进程。
+清空仍会拒绝任何 `running` 或 `awaiting_input` 任务/执行记录，在一个 `BEGIN IMMEDIATE` 事务内先生成 `pre-clear` 备份，再动态删除全部业务表数据；这包括由兼容新版本引入、当前旧二进制并不认识的 expand-only 表，循环外键在提交时统一校验。任一步失败都会回滚事务。它保留数据库结构、`gateway_lock`、迁移记录、配置和自增序列。若数据库维护已完成但 PM2 重启失败，CLI 会明确报告“数据库维护已完成”，此时按错误提示检查 `pm2 logs supertask-gateway`，不要重复清空。Dashboard 的“清空数据库”复用同一服务，要求服务端确认并拒绝活跃或等待人工输入的任务；因为 Dashboard 本身位于当前 Gateway 内，它只豁免当前 Gateway PID，不豁免其他进程。
 
 从备份恢复：
 

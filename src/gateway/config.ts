@@ -26,6 +26,12 @@ export interface GatewayConfig {
         host?: string;
         port: number;
     };
+    handoff: {
+        enabled: boolean;
+        herdrBin: string;
+        workspaceLabel: string;
+        opencodeBin: string;
+    };
 }
 
 const DEFAULT_CONFIG: GatewayConfig = {
@@ -51,6 +57,12 @@ const DEFAULT_CONFIG: GatewayConfig = {
         enabled: true,
         host: '127.0.0.1',
         port: 4680,
+    },
+    handoff: {
+        enabled: false,
+        herdrBin: 'herdr',
+        workspaceLabel: 'Scheduled Handoffs',
+        opencodeBin: 'opencode2',
     },
 };
 
@@ -121,6 +133,7 @@ export function validateConfig(input: unknown): GatewayConfig {
     const scheduler = objectAt(root.scheduler, 'scheduler');
     const watchdog = objectAt(root.watchdog, 'watchdog');
     const dashboard = objectAt(root.dashboard, 'dashboard');
+    const handoff = objectAt(root.handoff, 'handoff');
 
     const heartbeatIntervalMs = integerAt(worker, 'heartbeatIntervalMs', DEFAULT_CONFIG.worker.heartbeatIntervalMs, 1000, 3_600_000, 'worker');
     const heartbeatTimeoutMs = integerAt(watchdog, 'heartbeatTimeoutMs', DEFAULT_CONFIG.watchdog.heartbeatTimeoutMs, 1000, 86_400_000, 'watchdog');
@@ -165,6 +178,12 @@ export function validateConfig(input: unknown): GatewayConfig {
             enabled: booleanAt(dashboard, 'enabled', DEFAULT_CONFIG.dashboard.enabled, 'dashboard'),
             host: stringAt(dashboard, 'host', DEFAULT_CONFIG.dashboard.host!, 'dashboard'),
             port: integerAt(dashboard, 'port', DEFAULT_CONFIG.dashboard.port, 1, 65_535, 'dashboard'),
+        },
+        handoff: {
+            enabled: booleanAt(handoff, 'enabled', DEFAULT_CONFIG.handoff.enabled, 'handoff'),
+            herdrBin: stringAt(handoff, 'herdrBin', DEFAULT_CONFIG.handoff.herdrBin, 'handoff'),
+            workspaceLabel: stringAt(handoff, 'workspaceLabel', DEFAULT_CONFIG.handoff.workspaceLabel, 'handoff'),
+            opencodeBin: stringAt(handoff, 'opencodeBin', DEFAULT_CONFIG.handoff.opencodeBin, 'handoff'),
         },
     };
 }

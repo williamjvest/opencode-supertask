@@ -27,6 +27,8 @@ import {
 } from '@core/launch-protocol';
 import { validateTaskWorkingDirectory } from '@core/task-working-directory';
 import { normalizeTaskBatchId } from '@core/task-batch';
+import { extractHandoffMessage } from '@core/handoff-protocol';
+import { openHerdrHandoff } from '../handoff/herdr';
 
 const DEFAULT_MAX_OUTPUT_CHARS = 64 * 1024;
 const FORBIDDEN_AGENT = 'supertask-runner';
@@ -36,6 +38,7 @@ interface WorkerEngineOptions {
     maxOutputChars?: number;
     settlementRetryDelaysMs?: number[];
     settlementRetryIntervalMs?: number;
+    openHandoff?: typeof openHerdrHandoff;
 }
 
 interface TaskTermination {
@@ -51,6 +54,7 @@ interface RunningTask {
     commandContext: string;
     output: string;
     sessionId: string | null;
+    handoffMessage: string | null;
     timeoutTimer: ReturnType<typeof setTimeout> | null;
     termination: TaskTermination | null;
     terminationPromise: Promise<boolean> | null;
@@ -74,6 +78,10 @@ export function runCommandContext(executable: string, args: string[], cwd: strin
     });
 }
 
+export function managedTaskPrompt(prompt: string): string {
+    return `${prompt}\n\n---\nSuperTask managed-run protocol: Work autonomously unless the task genuinely cannot continue without Will's judgment, approval, credential entry, or physical action. In that case, call supertask_handoff exactly once with a concise message covering what is complete, what is blocked, and what Will must do. After calling it, stop; do not claim completion.`;
+}
+
 export function assertWorkerProcessIsolationSupported(
     platform: NodeJS.Platform = process.platform,
 ): void {
@@ -94,17 +102,21 @@ export class WorkerEngine {
     private shutdownDeadlineMs: number | null = null;
     private settlementRetryWakeups = new Set<() => void>();
     private cfg: GatewayConfig['worker'];
+    private handoffCfg: GatewayConfig['handoff'];
     private opencodeBin: string;
     private maxOutputChars: number;
     private settlementRetryDelaysMs: number[];
     private settlementRetryIntervalMs: number;
+    private openHandoff: typeof openHerdrHandoff;
 
     constructor(cfg: GatewayConfig, options: WorkerEngineOptions = {}) {
         this.cfg = cfg.worker;
+        this.handoffCfg = cfg.handoff;
         this.opencodeBin = options.opencodeBin ?? process.env.SUPERTASK_OPENCODE_BIN ?? 'opencode';
         this.maxOutputChars = options.maxOutputChars ?? DEFAULT_MAX_OUTPUT_CHARS;
         this.settlementRetryDelaysMs = options.settlementRetryDelaysMs ?? [250, 1_000, 4_000];
         this.settlementRetryIntervalMs = options.settlementRetryIntervalMs ?? 5_000;
+        this.openHandoff = options.openHandoff ?? openHerdrHandoff;
     }
 
     start() {
@@ -302,7 +314,7 @@ export class WorkerEngine {
         }
         const args = ['run', '--agent', task.agent, '--format', 'json'];
         if (model) args.push('-m', variant ? `${model}#${variant}` : model);
-        args.push(task.prompt);
+        args.push(managedTaskPrompt(task.prompt));
         const cwd = task.cwd || process.cwd();
 
         const child = spawn(process.execPath, [
@@ -329,6 +341,7 @@ export class WorkerEngine {
             commandContext: runCommandContext(this.opencodeBin, args, cwd),
             output: '',
             sessionId: null,
+            handoffMessage: null,
             timeoutTimer: null,
             termination: null,
             terminationPromise: null,
@@ -350,6 +363,7 @@ export class WorkerEngine {
                     this.logError('sessionId update failed', err, task.id);
                 });
             }
+            entry.handoffMessage ??= extractHandoffMessage(entry.output);
         };
         child.stdout?.on('data', handleData);
         child.stderr?.on('data', handleData);
@@ -582,6 +596,53 @@ export class WorkerEngine {
             : output;
 
         if (code === 0 && !failure) {
+            if (entry.handoffMessage) {
+                if (!this.handoffCfg.enabled) {
+                    const message = 'Human handoff requested, but Gateway handoff.enabled is false';
+                    const failed = await TaskService.failRun(entry.task.id, entry.runId, `${message}\n${log}`);
+                    if (!failed) await TaskRunService.fail(entry.runId, message);
+                    return;
+                }
+                if (!entry.sessionId) {
+                    const message = 'Human handoff requested before OpenCode session ID was captured';
+                    const failed = await TaskService.failRun(entry.task.id, entry.runId, `${message}\n${log}`);
+                    if (!failed) await TaskRunService.fail(entry.runId, message);
+                    return;
+                }
+
+                const awaiting = await TaskService.requestHandoff(
+                    entry.task.id,
+                    entry.runId,
+                    entry.handoffMessage,
+                    log,
+                );
+                if (!awaiting) {
+                    await TaskRunService.fail(entry.runId, 'Human handoff state transition was rejected');
+                    return;
+                }
+
+                const handoffRun = await TaskRunService.getById(entry.runId);
+                if (!handoffRun) return;
+                try {
+                    const location = await this.openHandoff(this.handoffCfg, awaiting, handoffRun);
+                    await TaskRunService.updateHandoffLocation(entry.runId, location);
+                    console.log(JSON.stringify({
+                        ts: new Date().toISOString(),
+                        level: 'info',
+                        msg: 'task awaiting human input in Herdr',
+                        taskId: entry.task.id,
+                        runId: entry.runId,
+                        ...location,
+                    }));
+                } catch (error) {
+                    const message = error instanceof Error ? error.message : String(error);
+                    await TaskRunService.updateHandoffError(entry.runId, message);
+                    markGatewayFailure('worker', error);
+                    this.logError('Herdr handoff launch failed', error, entry.task.id);
+                }
+                return;
+            }
+
             const completed = await TaskService.completeRun(entry.task.id, entry.runId, log);
             if (completed) {
                 console.log(JSON.stringify({

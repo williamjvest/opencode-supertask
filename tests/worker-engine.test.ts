@@ -14,7 +14,7 @@ import { spawn } from 'child_process';
 import { setupTestDb } from './helpers/mock-db';
 import { TaskService } from '../src/core/services/task.service';
 import { TaskRunService } from '../src/core/services/task-run.service';
-import { WorkerEngine, assertWorkerProcessIsolationSupported } from '../src/worker';
+import { WorkerEngine, assertWorkerProcessIsolationSupported, managedTaskPrompt } from '../src/worker';
 import { waitForProcessGroupDrain } from '../src/worker/launcher';
 import type { GatewayConfig } from '../src/gateway/config';
 import type { TaskStatus } from '../src/core/db/schema';
@@ -31,6 +31,7 @@ import {
     MANAGED_RUN_ENV_VALUE,
     TOKEN_GUARDIAN_LAUNCH_PROTOCOL,
 } from '../src/core/launch-protocol';
+import { encodeHandoffMarker } from '../src/core/handoff-protocol';
 
 const tempDirs: string[] = [];
 const workers: WorkerEngine[] = [];
@@ -40,6 +41,7 @@ function createFakeOpencode(options: {
     exitCode?: number;
     delayMs?: number;
     ignoreSigterm?: boolean;
+    output?: string;
 }) {
     const dir = mkdtempSync(join(tmpdir(), 'supertask-worker-test-'));
     tempDirs.push(dir);
@@ -55,6 +57,7 @@ await Bun.write(${JSON.stringify(envFile)}, JSON.stringify({
     cwd: process.cwd(),
 }));
 console.log(JSON.stringify({ sessionID: "ses_worker_test", message: "任务执行完成" }));
+${options.output ? `console.log(${JSON.stringify(options.output)});` : ''}
 ${options.ignoreSigterm ? "process.on('SIGTERM', () => {});" : ''}
 await Bun.sleep(${options.delayMs ?? 0});
 process.exit(${options.exitCode ?? 0});
@@ -115,6 +118,7 @@ function createConfig(taskTimeoutMs = 2_000): GatewayConfig {
             retentionDays: 30,
         },
         dashboard: { enabled: false, port: 4680 },
+        handoff: { enabled: false, herdrBin: 'herdr', workspaceLabel: 'Scheduled Handoffs', opencodeBin: 'opencode2' },
     };
 }
 
@@ -200,7 +204,7 @@ describe('WorkerEngine', () => {
 
         expect(args).toEqual([
             'run', '--agent', 'test-agent', '--format', 'json',
-            '-m', 'test-model#xhigh', prompt,
+            '-m', 'test-model#xhigh', managedTaskPrompt(prompt),
         ]);
         expect(childEnv.managedRun).toBe(MANAGED_RUN_ENV_VALUE);
         if (!childEnv.pwd) throw new Error('子进程未记录 PWD');
@@ -221,6 +225,76 @@ describe('WorkerEngine', () => {
         expect(runs[0].log).toContain('"args":["run","--agent","test-agent"');
         expect(runs[0].log).toContain('"-m","test-model#xhigh"');
         expect(runs[0].log).toContain(JSON.stringify(prompt).slice(1, -1));
+        expect(runs[0].log).toContain('SuperTask managed-run protocol');
+    });
+
+    test('显式 handoff 保留会话、释放 Worker 并在 Herdr 退出后完成任务', async () => {
+        const message = 'Need Will to approve the final migration target.';
+        const fake = createFakeOpencode({ output: encodeHandoffMarker(message) });
+        const task = await TaskService.add({
+            name: '人工交接测试',
+            agent: 'test-agent',
+            prompt: '需要 Will 输入',
+            batchId: 'handoff-test',
+            cwd: fake.dir,
+            maxRetries: 0,
+        });
+        await TaskService.add({
+            name: '同批次后续任务',
+            agent: 'test-agent',
+            prompt: '必须等待交接',
+            batchId: 'handoff-test',
+            cwd: fake.dir,
+        });
+        const config = createConfig();
+        config.handoff.enabled = true;
+        const opened: Array<{ taskId: number; runId: number; sessionId: string | null }> = [];
+        const worker = new WorkerEngine(config, {
+            opencodeBin: fake.executable,
+            openHandoff: async (_cfg, openedTask, openedRun) => {
+                opened.push({
+                    taskId: openedTask.id,
+                    runId: openedRun.id,
+                    sessionId: openedRun.sessionId,
+                });
+                return { workspaceId: 'w-test', tabId: 't-test', paneId: 'p-test' };
+            },
+        });
+        workers.push(worker);
+
+        worker.start();
+        const awaiting = await waitForStatus(task.id, ['awaiting_input']);
+        await waitForWorkerCount(worker, 0);
+        const run = (await TaskRunService.listByTaskId(task.id))[0];
+
+        expect(awaiting.finishedAt).toBeNull();
+        expect(run.status).toBe('awaiting_input');
+        expect(run.sessionId).toBe('ses_worker_test');
+        expect(run.handoffMessage).toBe(message);
+        expect(run.herdrWorkspaceId).toBe('w-test');
+        expect(run.herdrTabId).toBe('t-test');
+        expect(run.herdrPaneId).toBe('p-test');
+        expect(opened).toEqual([{ taskId: task.id, runId: run.id, sessionId: 'ses_worker_test' }]);
+        expect(await TaskService.next()).toBeNull();
+
+        const completed = await TaskService.completeHandoff(task.id, run.id);
+        expect(completed?.status).toBe('done');
+        expect((await TaskRunService.getById(run.id))?.status).toBe('done');
+        expect((await TaskService.next())?.name).toBe('同批次后续任务');
+    });
+
+    test('handoff 未启用时明确失败而不留下无法接管的等待任务', async () => {
+        const fake = createFakeOpencode({ output: encodeHandoffMarker('Need Will.') });
+        const task = await TaskService.add({
+            name: '禁用交接测试', agent: 'test-agent', prompt: '请求交接', cwd: fake.dir, maxRetries: 0,
+        });
+        const worker = new WorkerEngine(createConfig(), { opencodeBin: fake.executable });
+        workers.push(worker);
+
+        worker.start();
+        const failed = await waitForStatus(task.id, ['dead_letter']);
+        expect(failed.resultLog).toContain('handoff.enabled is false');
+        expect((await TaskRunService.listByTaskId(task.id))[0].status).toBe('failed');
     });
 
     test('停机发生在 claim 期间时把无 run 的任务恢复为 pending', async () => {

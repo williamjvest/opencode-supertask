@@ -65,7 +65,13 @@ export function setupTestDb() {
             heartbeat_at INTEGER,
             worker_pid INTEGER,
             child_pid INTEGER,
-            launch_protocol TEXT
+            launch_protocol TEXT,
+            handoff_message TEXT,
+            handoff_requested_at INTEGER,
+            herdr_workspace_id TEXT,
+            herdr_tab_id TEXT,
+            herdr_pane_id TEXT,
+            handoff_error TEXT
         );
     `);
     sqlite.exec('CREATE INDEX tasks_depends_on_status_idx ON tasks(depends_on, status);');

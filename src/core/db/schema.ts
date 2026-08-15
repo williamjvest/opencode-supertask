@@ -53,7 +53,7 @@ export const tasks = sqliteTable('tasks', {
 
 export type Task = typeof tasks.$inferSelect;
 export type NewTask = typeof tasks.$inferInsert;
-export type TaskStatus = 'pending' | 'running' | 'done' | 'failed' | 'dead_letter' | 'cancelled';
+export type TaskStatus = 'pending' | 'running' | 'awaiting_input' | 'done' | 'failed' | 'dead_letter' | 'cancelled';
 
 export const TASK_CATEGORIES = [
     'translate',
@@ -85,6 +85,15 @@ export const taskRuns = sqliteTable('task_runs', {
     workerPid: integer('worker_pid'),
     childPid: integer('child_pid'),
     launchProtocol: text('launch_protocol'),
+
+    // Human handoff state. The headless run exits before a persistent Herdr TUI
+    // resumes the captured OpenCode session.
+    handoffMessage: text('handoff_message'),
+    handoffRequestedAt: integer('handoff_requested_at'),
+    herdrWorkspaceId: text('herdr_workspace_id'),
+    herdrTabId: text('herdr_tab_id'),
+    herdrPaneId: text('herdr_pane_id'),
+    handoffError: text('handoff_error'),
 }, (table) => [
     index('task_runs_task_started_idx').on(table.taskId, table.startedAt, table.id),
     index('task_runs_status_heartbeat_idx').on(table.status, table.heartbeatAt),
@@ -92,7 +101,7 @@ export const taskRuns = sqliteTable('task_runs', {
 
 export type TaskRun = typeof taskRuns.$inferSelect;
 export type NewTaskRun = typeof taskRuns.$inferInsert;
-export type TaskRunStatus = 'running' | 'done' | 'failed';
+export type TaskRunStatus = 'running' | 'awaiting_input' | 'done' | 'failed';
 
 export const taskTemplates = sqliteTable('task_templates', {
     id: integer('id').primaryKey({ autoIncrement: true }),

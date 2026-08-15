@@ -50,7 +50,7 @@ import {
 const app = new Hono();
 const LEGACY_PROJECT_FILTER = '__supertask_legacy__';
 const TASK_STATUSES = new Set<TaskStatus>([
-    'pending', 'running', 'done', 'failed', 'dead_letter', 'cancelled',
+    'pending', 'running', 'awaiting_input', 'done', 'failed', 'dead_letter', 'cancelled',
 ]);
 const SESSION_ID_PATTERN = /^ses_[A-Za-z0-9_]+$/;
 let runtimeConfig: GatewayConfig | null = null;
@@ -91,7 +91,7 @@ function maskSessionId(value: string | null | undefined): string {
 
 function sessionCommand(value: string): string {
     if (!isValidSessionId(value)) throw new Error('session unavailable');
-    return `opencode --session ${value}`;
+    return `opencode2 --session ${value}`;
 }
 
 function configsEqual(left: GatewayConfig, right: GatewayConfig): boolean {
@@ -665,6 +665,7 @@ app.get('/', async (c) => {
         { status: '', label: t(locale, 'filter.all') },
         { status: 'pending', label: statusText(locale, 'pending') },
         { status: 'running', label: statusText(locale, 'running') },
+        { status: 'awaiting_input', label: statusText(locale, 'awaiting_input') },
         { status: 'done', label: statusText(locale, 'done') },
         { status: 'failed', label: statusText(locale, 'failed') },
         { status: 'dead_letter', label: statusText(locale, 'dead_letter') },
@@ -686,7 +687,7 @@ app.get('/', async (c) => {
           <td data-primary data-label="${t(locale, 'table.task')}"><div class="task-name">${esc(task.name)}</div><div class="task-prompt" title="${esc(task.prompt)}">${esc(task.prompt.substring(0, 160))}</div>
             <div class="actions task-context"><span class="tag" title="${esc(task.cwd ?? '')}">${esc(task.cwd ? (basename(task.cwd) || task.cwd) : t(locale, 'projects.legacy'))}</span>${batchId ? `<span class="tag" title="${esc(t(locale, 'template.batchId'))}">${esc(batchId)}</span>` : ''}</div></td>
           <td data-label="${t(locale, 'table.agent')}"><span class="tag">${esc(task.agent)}</span></td>
-          <td data-label="${t(locale, 'table.status')}"><span class="badge b-${status}" ${status === 'dead_letter' ? `title="${esc(t(locale, 'status.deadLetterHint'))}"` : ''}>${statusText(locale, status)}</span>${status === 'dead_letter' ? `<div class="muted small" style="margin-top:5px">${t(locale, 'status.deadLetterAction')}</div>` : ''}${executionActive && status !== 'running' ? `<div class="muted small" style="margin-top:5px">${t(locale, 'status.executionStillActive')}</div>` : ''}</td>
+          <td data-label="${t(locale, 'table.status')}"><span class="badge b-${status}" ${status === 'dead_letter' ? `title="${esc(t(locale, 'status.deadLetterHint'))}"` : ''}>${statusText(locale, status)}</span>${status === 'awaiting_input' && latestRun?.handoffMessage ? `<div class="muted small" style="margin-top:5px;max-width:280px">${esc(latestRun.handoffMessage)}</div>` : ''}${status === 'awaiting_input' && latestRun?.handoffError ? `<div class="small" style="margin-top:5px;color:var(--red)">${esc(latestRun.handoffError)}</div>` : ''}${status === 'dead_letter' ? `<div class="muted small" style="margin-top:5px">${t(locale, 'status.deadLetterAction')}</div>` : ''}${executionActive && status !== 'running' ? `<div class="muted small" style="margin-top:5px">${t(locale, 'status.executionStillActive')}</div>` : ''}</td>
           <td data-label="${t(locale, 'table.duration')}" class="small ${executionActive || task.status === 'running' ? '' : 'muted'}">${formatDuration(task.startedAt, task.finishedAt)}</td>
           <td data-label="${t(locale, 'table.retries')}" class="muted small">${(task.retryCount ?? 0) > 0 ? task.retryCount : '—'}</td>
           <td data-label="${t(locale, 'table.actions')}"><div class="actions">
@@ -694,8 +695,8 @@ app.get('/', async (c) => {
             <button type="button" class="btn" onclick="showDetail(${task.id})">${t(locale, 'action.details')}</button>
             ${isValidSessionId(latestRun?.sessionId) ? `<button type="button" class="btn" onclick="copySessionCommand(${latestRun.id})">${icon('copy')}${t(locale, 'action.continueSession')}</button>` : ''}
             ${task.status === 'failed' || task.status === 'dead_letter' ? `<button type="button" class="btn btn-warning" onclick="retryTask(${task.id})">${t(locale, 'action.retry')}</button>` : ''}
-            ${['pending', 'running', 'failed'].includes(task.status ?? '') ? `<button type="button" class="btn btn-warning" onclick="cancelTask(${task.id})">${t(locale, 'action.cancel')}</button>` : ''}
-            ${task.status === 'running' || executionActive ? '' : `<button type="button" class="btn btn-danger" onclick="deleteTask(${task.id})">${t(locale, 'action.delete')}</button>`}
+            ${['pending', 'running', 'awaiting_input', 'failed'].includes(task.status ?? '') ? `<button type="button" class="btn btn-warning" onclick="cancelTask(${task.id})">${t(locale, 'action.cancel')}</button>` : ''}
+            ${['running', 'awaiting_input'].includes(task.status ?? '') || executionActive ? '' : `<button type="button" class="btn btn-danger" onclick="deleteTask(${task.id})">${t(locale, 'action.delete')}</button>`}
           </div></td>
         </tr>`;
     }).join('');
@@ -895,6 +896,8 @@ app.get('/runs', async (c) => {
         model: taskRuns.model, variant: taskRuns.variant, status: taskRuns.status, startedAt: taskRuns.startedAt,
         finishedAt: taskRuns.finishedAt, log: taskRuns.log, heartbeatAt: taskRuns.heartbeatAt,
         workerPid: taskRuns.workerPid, childPid: taskRuns.childPid,
+        handoffMessage: taskRuns.handoffMessage, handoffError: taskRuns.handoffError,
+        herdrTabId: taskRuns.herdrTabId,
         taskName: tasks.name, taskAgent: tasks.agent,
     }).from(taskRuns).innerJoin(tasks, eq(taskRuns.taskId, tasks.id))
         .orderBy(desc(taskRuns.startedAt), desc(taskRuns.id)).limit(limit).offset(offset);
@@ -912,7 +915,7 @@ app.get('/runs', async (c) => {
           <td data-primary data-label="${t(locale, 'table.task')}"><div class="task-name">${esc(run.taskName)} <span class="faint">#${run.taskId}</span></div>${run.model || run.variant ? `<div class="actions" style="margin-top:4px">${run.model ? `<span class="tag">${esc(run.model)}</span>` : ''}${run.variant ? `<span class="tag">${esc(run.variant)}</span>` : ''}</div>` : ''}</td>
           <td data-label="${t(locale, 'table.agent')}"><span class="tag">${esc(run.taskAgent)}</span></td>
           <td data-label="${t(locale, 'table.session')}" class="m small">${esc(maskSessionId(run.sessionId))}</td>
-          <td data-label="${t(locale, 'table.status')}"><span class="badge b-${status}">${runStatusText(locale, run.status ?? 'unknown')}</span></td>
+          <td data-label="${t(locale, 'table.status')}"><span class="badge b-${status}">${runStatusText(locale, run.status ?? 'unknown')}</span>${status === 'awaiting_input' && run.handoffMessage ? `<div class="muted small" style="margin-top:5px;max-width:280px">${esc(run.handoffMessage)}</div>` : ''}${run.handoffError ? `<div class="small" style="margin-top:5px;color:var(--red)">${esc(run.handoffError)}</div>` : ''}</td>
           <td data-label="${t(locale, 'table.duration')}" class="small">${formatDuration(run.startedAt, run.finishedAt)}</td>
           <td data-label="${t(locale, 'table.heartbeat')}" class="small muted">${formatRelative(run.heartbeatAt, locale)}</td>
           <td data-label="${t(locale, 'table.actions')}"><div class="actions"><button type="button" class="btn" onclick="showRunDetail(${run.id})">${t(locale, 'action.details')}</button>

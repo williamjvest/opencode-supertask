@@ -64,6 +64,13 @@
       "when": 1784419767211,
       "tag": "0008_good_smasher",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1786805128541,
+      "tag": "0009_quiet_sharon_carter",
+      "breakpoints": true
     }
   ]
 }

@@ -201,7 +201,7 @@ export class TaskTemplateService {
                               SELECT 1 FROM tasks AS active_task
                               WHERE active_task.template_id = candidate.id
                                 AND (
-                                    active_task.status IN ('pending', 'running')
+                                    active_task.status IN ('pending', 'running', 'awaiting_input')
                                     OR (
                                         active_task.status = 'failed'
                                         AND active_task.retry_count <= active_task.max_retries

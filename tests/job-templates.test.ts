@@ -371,6 +371,7 @@ describe('job-templates', () => {
                     retentionDays: 30,
                 },
                 dashboard: { enabled: false, port: 4680 },
+                handoff: { enabled: false, herdrBin: 'herdr', workspaceLabel: 'Scheduled Handoffs', opencodeBin: 'opencode2' },
             };
             const scheduler = new Scheduler(config);
             const tick = (scheduler as unknown as { tick(): Promise<void> }).tick.bind(scheduler);
@@ -587,6 +588,7 @@ describe('job-templates', () => {
                     retentionDays: 30,
                 },
                 dashboard: { enabled: false, port: 4680 },
+                handoff: { enabled: false, herdrBin: 'herdr', workspaceLabel: 'Scheduled Handoffs', opencodeBin: 'opencode2' },
             };
             const scheduler = new Scheduler(config);
             await scheduler.start();

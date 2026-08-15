@@ -164,6 +164,7 @@ if (args[0] === 'install') writeFileSync(${JSON.stringify(moduleState)}, 'instal
         const plist = join(dir, 'LaunchAgents', 'supertask.plist');
         const supervisorEntry = join(process.cwd(), 'src/daemon/pm2-supervisor.ts');
         const gateway = join(dir, 'gateway.js');
+        process.env.SUPERTASK_BUN_BIN = process.execPath;
         const expectedEnv = { ...process.env, PM2_HOME: pm2Home };
         mkdirSync(pm2Home, { recursive: true });
         writeFileSync(gateway, '');

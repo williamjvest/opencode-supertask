@@ -56,7 +56,7 @@ function hasNoExecutableDependents() {
     return sql`NOT EXISTS (
         SELECT 1 FROM tasks AS dependent_task
         WHERE dependent_task.depends_on = ${tasks.id}
-          AND dependent_task.status IN ('pending', 'running', 'failed', 'dead_letter')
+          AND dependent_task.status IN ('pending', 'running', 'awaiting_input', 'failed', 'dead_letter')
     )`;
 }
 
@@ -68,7 +68,7 @@ function hasViableDependency() {
             WHERE dependency_task.id = ${tasks.dependsOn}
               AND dependency_task.cwd IS ${tasks.cwd}
               AND (
-                  dependency_task.status IN ('pending', 'running', 'done')
+                  dependency_task.status IN ('pending', 'running', 'awaiting_input', 'done')
                   OR (
                       dependency_task.status = 'failed'
                       AND dependency_task.retry_count <= dependency_task.max_retries
@@ -137,6 +137,7 @@ export class TaskService {
                 }
                 const dependencyIsRecoverable = dependency.status === 'pending'
                     || dependency.status === 'running'
+                    || dependency.status === 'awaiting_input'
                     || dependency.status === 'done'
                     || (
                         dependency.status === 'failed'
@@ -299,7 +300,7 @@ export class TaskService {
                     WHERE trim(running_batch_task.batch_id, ${TASK_BATCH_TRIM_CHARACTERS})
                         = trim(${tasks.batchId}, ${TASK_BATCH_TRIM_CHARACTERS})
                       AND (
-                          running_batch_task.status = 'running'
+                          running_batch_task.status IN ('running', 'awaiting_input')
                           OR EXISTS (
                               SELECT 1 FROM task_runs AS running_batch_run
                               WHERE running_batch_run.task_id = running_batch_task.id
@@ -531,6 +532,95 @@ export class TaskService {
                 .where(and(eq(taskRuns.id, runId), eq(taskRuns.status, 'running')))
                 .run();
             return completed;
+        }, { behavior: 'immediate' });
+    }
+
+    static async requestHandoff(
+        taskId: number,
+        runId: number,
+        message: string,
+        log?: string,
+    ): Promise<Task | null> {
+        return db.transaction((tx) => {
+            const currentTask = tx
+                .select()
+                .from(tasks)
+                .where(and(eq(tasks.id, taskId), eq(tasks.status, 'running')))
+                .get();
+            const currentRun = tx
+                .select({ id: taskRuns.id })
+                .from(taskRuns)
+                .where(and(
+                    eq(taskRuns.id, runId),
+                    eq(taskRuns.taskId, taskId),
+                    eq(taskRuns.status, 'running'),
+                ))
+                .get();
+            if (!currentTask || !currentRun) return null;
+
+            const requestedAt = Date.now();
+            const task = tx
+                .update(tasks)
+                .set({
+                    status: 'awaiting_input',
+                    finishedAt: null,
+                    resultLog: log,
+                    retryAfter: null,
+                })
+                .where(and(eq(tasks.id, taskId), eq(tasks.status, 'running')))
+                .returning()
+                .get();
+            if (!task) return null;
+
+            tx.update(taskRuns)
+                .set({
+                    status: 'awaiting_input',
+                    finishedAt: null,
+                    log,
+                    handoffMessage: message,
+                    handoffRequestedAt: requestedAt,
+                    workerPid: null,
+                    childPid: null,
+                    lockedAt: null,
+                    lockedBy: null,
+                    heartbeatAt: null,
+                    handoffError: null,
+                })
+                .where(and(eq(taskRuns.id, runId), eq(taskRuns.status, 'running')))
+                .run();
+            return task;
+        }, { behavior: 'immediate' });
+    }
+
+    static async completeHandoff(taskId: number, runId: number): Promise<Task | null> {
+        return db.transaction((tx) => {
+            const run = tx
+                .select({ log: taskRuns.log })
+                .from(taskRuns)
+                .where(and(
+                    eq(taskRuns.id, runId),
+                    eq(taskRuns.taskId, taskId),
+                    eq(taskRuns.status, 'awaiting_input'),
+                ))
+                .get();
+            if (!run) return null;
+
+            const finishedAt = new Date();
+            const note = 'Human handoff completed in Herdr';
+            const log = run.log ? `${run.log}\n${note}` : note;
+            const task = tx
+                .update(tasks)
+                .set({ status: 'done', finishedAt, resultLog: log, retryAfter: null })
+                .where(and(eq(tasks.id, taskId), eq(tasks.status, 'awaiting_input')))
+                .returning()
+                .get();
+            if (!task) return null;
+
+            tx.update(taskRuns)
+                .set({ status: 'done', finishedAt, log, handoffError: null })
+                .where(and(eq(taskRuns.id, runId), eq(taskRuns.status, 'awaiting_input')))
+                .run();
+            return task;
         }, { behavior: 'immediate' });
     }
 
@@ -852,6 +942,7 @@ export class TaskService {
             or(
                 eq(tasks.status, 'pending'),
                 eq(tasks.status, 'running'),
+                eq(tasks.status, 'awaiting_input'),
                 eq(tasks.status, 'failed'),
             ),
             ...this.buildScopeWhere(scope),
@@ -869,6 +960,17 @@ export class TaskService {
                 .returning()
                 .get();
             if (!task) return null;
+            tx.update(taskRuns)
+                .set({
+                    status: 'failed',
+                    finishedAt,
+                    handoffError: 'Task cancelled while awaiting human input',
+                })
+                .where(and(
+                    eq(taskRuns.taskId, id),
+                    eq(taskRuns.status, 'awaiting_input'),
+                ))
+                .run();
             tx.update(tasks)
                 .set({
                     status: 'dead_letter',
@@ -1057,6 +1159,7 @@ export class TaskService {
             total: 0,
             pending: 0,
             running: 0,
+            awaiting_input: 0,
             done: 0,
             failed: 0,
             dead_letter: 0,
@@ -1082,7 +1185,7 @@ export class TaskService {
                 cwd: tasks.cwd,
                 total: sql<number>`count(*)`,
                 pending: sql<number>`sum(CASE WHEN ${tasks.status} = 'pending' THEN 1 ELSE 0 END)`,
-                running: sql<number>`sum(CASE WHEN ${tasks.status} = 'running' OR EXISTS (
+                running: sql<number>`sum(CASE WHEN ${tasks.status} IN ('running', 'awaiting_input') OR EXISTS (
                     SELECT 1 FROM task_runs AS active_project_run
                     WHERE active_project_run.task_id = ${tasks.id}
                       AND active_project_run.status = 'running'
@@ -1111,7 +1214,7 @@ export class TaskService {
     static async delete(id: number, scope: { cwd?: string } = {}): Promise<boolean> {
         const conditions = [
             eq(tasks.id, id),
-            sql`${tasks.status} <> 'running'`,
+            sql`${tasks.status} NOT IN ('running', 'awaiting_input')`,
             sql`NOT EXISTS (
                 SELECT 1 FROM ${taskRuns}
                 WHERE ${taskRuns.taskId} = ${tasks.id}
@@ -1134,7 +1237,7 @@ export class TaskService {
             .from(tasks)
             .where(and(
                 eq(tasks.dependsOn, id),
-                sql`${tasks.status} IN ('pending', 'running', 'failed', 'dead_letter')`,
+                sql`${tasks.status} IN ('pending', 'running', 'awaiting_input', 'failed', 'dead_letter')`,
             ))
             .orderBy(asc(tasks.id))
             .limit(1);
@@ -1144,7 +1247,7 @@ export class TaskService {
             );
         }
         throw new TaskDeletionConflictError(
-            `任务 #${id} 正在运行，请先取消任务并等待执行进程退出`,
+            `任务 #${id} 正在运行或等待人工输入，请先取消任务并等待执行进程退出`,
         );
     }
 

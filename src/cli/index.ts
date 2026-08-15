@@ -26,6 +26,8 @@ import {
 import { getOpenCodePluginDiagnostic } from '../daemon/update';
 import { cliText, resolveCliLocale } from './i18n';
 import { runDoctorSmoke, type DoctorSmokeResult } from './doctor-smoke';
+import { spawn, type ChildProcess } from 'child_process';
+import { openHerdrHandoff } from '../handoff/herdr';
 
 const cliLocale = resolveCliLocale();
 const t = (zh: string, en: string): string => cliText(cliLocale, zh, en);
@@ -501,6 +503,76 @@ databaseCommand
     }, (error) => renderDatabaseError(error, { forceJson: options.json })));
 
 program.addCommand(databaseCommand);
+
+const handoffCommand = new Command('handoff')
+    .description(t('管理需要人工输入的 Herdr 交接', 'manage Herdr human handoffs'));
+
+handoffCommand
+    .command('open')
+    .description(t('为等待输入的 run 打开或重新打开 Herdr 标签页', 'open or reopen a Herdr tab for an awaiting run'))
+    .argument('<runId>', t('执行记录 ID', 'run ID'))
+    .action(async (runIdValue) => withDb(async () => {
+        const runId = parsePositiveInteger(runIdValue, 'runId');
+        const run = await TaskRunService.getById(runId);
+        if (!run || run.status !== 'awaiting_input') throw new Error(`run #${runId} is not awaiting input`);
+        const task = await TaskService.getById(run.taskId);
+        if (!task) throw new Error(`task #${run.taskId} not found`);
+        try {
+            const location = await openHerdrHandoff(loadConfig().handoff, task, run);
+            await TaskRunService.updateHandoffLocation(runId, location);
+            console.log(JSON.stringify({ runId, ...location }));
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            await TaskRunService.updateHandoffError(runId, message);
+            throw error;
+        }
+    }));
+
+handoffCommand
+    .command('attach')
+    .description(t('在当前终端恢复 OpenCode 会话并在退出时结算交接', 'resume the OpenCode session and settle the handoff on exit'))
+    .argument('<runId>', t('执行记录 ID', 'run ID'))
+    .action(async (runIdValue) => {
+        const runId = parsePositiveInteger(runIdValue, 'runId');
+        const run = await TaskRunService.getById(runId);
+        if (!run || run.status !== 'awaiting_input') throw new Error(`run #${runId} is not awaiting input`);
+        if (!run.sessionId) throw new Error(`run #${runId} has no OpenCode session`);
+        const task = await TaskService.getById(run.taskId);
+        if (!task?.cwd) throw new Error(`task #${run.taskId} has no working directory`);
+        const config = loadConfig();
+        const sessionId = run.sessionId;
+        const cwd = task.cwd;
+
+        const result = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+            const child: ChildProcess = spawn(config.handoff.opencodeBin, ['--session', sessionId], {
+                cwd,
+                env: { ...process.env, HERDR_AGENT: 'opencode' },
+                stdio: 'inherit',
+            });
+            child.once('error', (error: Error) => {
+                void TaskRunService.updateHandoffError(runId, error.message);
+                resolve({ code: 127, signal: null });
+            });
+            child.once('exit', (code: number | null, signal: NodeJS.Signals | null) => resolve({ code, signal }));
+        });
+
+        if (result.code === 0 && result.signal === null) {
+            const completed = await TaskService.completeHandoff(task.id, runId);
+            if (!completed) throw new Error(`handoff #${runId} state changed before completion`);
+            console.log(`SuperTask handoff #${runId} completed.`);
+            closeDb();
+            return;
+        }
+
+        const reason = result.signal
+            ? `OpenCode TUI exited with signal ${result.signal}`
+            : `OpenCode TUI exited with code ${result.code ?? 'unknown'}`;
+        await TaskRunService.updateHandoffError(runId, reason);
+        closeDb();
+        process.exitCode = result.code && result.code > 0 ? result.code : 1;
+    });
+
+program.addCommand(handoffCommand);
 
 program
     .command('init')

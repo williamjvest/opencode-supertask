@@ -12,7 +12,7 @@
   <strong>English</strong> | <a href="https://github.com/vbgate/opencode-supertask/blob/main/README.zh-CN.md">简体中文</a>
 </p>
 
-SuperTask turns one-off `opencode run` commands into durable Agent operations. It gives OpenCode agents a persistent SQLite queue, scheduling, retries, concurrency control, safe cancellation, execution history, and a local Web Dashboard.
+SuperTask turns one-off `opencode run` commands into durable Agent operations. It gives OpenCode agents a persistent SQLite queue, scheduling, retries, concurrency control, safe cancellation, execution history, explicit human handoff into Herdr, and a local Web Dashboard.
 
 OpenCode can run an Agent now. SuperTask makes sure the work is still tracked after the terminal closes, the process fails, or the machine restarts.
 
@@ -158,6 +158,8 @@ The responsive Dashboard supports English and Chinese, light and dark themes, an
 | System Status | Inspect active configuration, health, concurrency, and backup-first database maintenance |
 
 The project picker reads the selected directory's Agent and model catalogs through the OpenCode 2 client, so forms offer only locally available models, each model's declared variants, and directly runnable Agents. A non-default variant is passed as `model#variant`; leaving it at default follows the Agent/model configuration.
+
+When `handoff.enabled` is configured, a managed Agent can explicitly call `supertask_handoff`. SuperTask preserves its OpenCode session, marks the run **Awaiting Will**, opens a persistent tab in the dedicated Herdr workspace, and resumes the same session in the OpenCode 2 TUI. The task completes when that TUI exits normally.
 
 ## Reliability Without Hand-Waving
 

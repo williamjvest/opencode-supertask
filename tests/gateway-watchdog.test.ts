@@ -50,6 +50,7 @@ function createWatchdogConfig(): GatewayConfig {
             retentionDays: 30,
         },
         dashboard: { enabled: false, port: 4680 },
+        handoff: { enabled: false, herdrBin: 'herdr', workspaceLabel: 'Scheduled Handoffs', opencodeBin: 'opencode2' },
     };
 }
 

@@ -21,5 +21,11 @@
     "enabled": true,
     "host": "asmond.story-mimosa.ts.net",
     "port": 14680
+  },
+  "handoff": {
+    "enabled": true,
+    "herdrBin": "/Users/williamvest/.local/bin/herdr",
+    "workspaceLabel": "Scheduled Handoffs",
+    "opencodeBin": "/Users/williamvest/local/bin/opencode2"
   }
 }

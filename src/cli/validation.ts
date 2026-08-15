@@ -3,6 +3,7 @@ import type { TaskStatus } from '@core/db/schema';
 const TASK_STATUSES = new Set<TaskStatus>([
     'pending',
     'running',
+    'awaiting_input',
     'done',
     'failed',
     'dead_letter',

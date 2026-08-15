@@ -117,6 +117,36 @@ export class TaskRunService {
         return result[0] || null;
     }
 
+    static async updateHandoffLocation(
+        id: number,
+        location: {
+            workspaceId: string;
+            tabId: string;
+            paneId: string;
+        },
+    ): Promise<TaskRun | null> {
+        const result = await db
+            .update(taskRuns)
+            .set({
+                herdrWorkspaceId: location.workspaceId,
+                herdrTabId: location.tabId,
+                herdrPaneId: location.paneId,
+                handoffError: null,
+            })
+            .where(and(eq(taskRuns.id, id), eq(taskRuns.status, 'awaiting_input')))
+            .returning();
+        return result[0] || null;
+    }
+
+    static async updateHandoffError(id: number, error: string): Promise<TaskRun | null> {
+        const result = await db
+            .update(taskRuns)
+            .set({ handoffError: error })
+            .where(and(eq(taskRuns.id, id), eq(taskRuns.status, 'awaiting_input')))
+            .returning();
+        return result[0] || null;
+    }
+
     static async listByTaskId(taskId: number): Promise<TaskRun[]> {
         return await db
             .select()

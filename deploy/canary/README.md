@@ -8,8 +8,11 @@ Asmond-only, isolated SuperTask pilot. It does not replace or modify the product
 - LaunchAgent: `com.vv.supertask-canary`
 - Gatus heartbeat: `loops_supertask-canary` (8-hour dead-man)
 - OpenCode executable: `/Users/williamvest/local/bin/opencode2`
+- Human handoff: enabled into Herdr workspace `Scheduled Handoffs`
 
 The pilot runs one harmless `infra` task every six hours. The prompt returns the marker `SUPERTASK_CANARY_OK` and explicitly forbids tool use. Keep the existing production scheduler unchanged for the full seven-day observation window.
+
+For an explicit human handoff test, a managed Agent calls `supertask_handoff`. The original headless run becomes `awaiting_input`, a persistent tab opens in Herdr's `Scheduled Handoffs` workspace, and the same OpenCode 2 session resumes there. Exiting that TUI normally completes the task.
 
 Verify with:
 

@@ -75,6 +75,8 @@ opencode2 run --agent <task.agent> --format json [-m <model>[#<variant>]] <task.
 
 Worker 通过无 LLM 的 launcher 直接执行目标 Agent，不再嵌套 `supertask-runner`。新 run 使用 `gated-v3-token-guardian`：每次执行生成独立 UUID，同时写入 `task_runs.locked_by` 和 launcher argv；Watchdog 只有在 launcher 路径、OpenCode 参数和该 UUID 全部匹配时才会向进程组发信号。launcher 在 PID 成功落库前不会启动 OpenCode；父进程提前退出会关闭握手管道，避免产生未登记的执行进程。OpenCode 及仍属于受管进程组的后代全部退出后，launcher 还必须通过不传递给 OpenCode 的 IPC 返回绑定该 UUID 的排空证明；guardian 异常退出且无证明时，Worker 保持 run 与批次隔离，直到进程组明确消失。受管 OpenCode 进程带有 `SUPERTASK_MANAGED_RUN=1`，插件在该上下文拒绝执行升级，避免任务删除并等待承载自己的 Gateway；升级只能从外部 CLI 或非队列会话发起。`task.agent=supertask-runner` 会被明确拒绝并进入死信。
 
+显式人工交接使用插件工具返回的版本化 marker，而不是从自然语言猜测“需要人”。Worker 在 JSONL 流中捕获 marker 与 Session ID，仍先等待 headless 进程组排空证明，再把 task/run 原子转为 `awaiting_input`。Herdr 适配器用参数数组创建专用工作区/标签页，并在任务 `cwd` 运行 CLI attach 包装器；包装器以 `opencode2 --session` 恢复同一会话，TUI 正常退出才把 task/run 转为 `done`。等待态不占 Worker 进程并发，但继续阻塞同批次任务、依赖和模板实例；取消会关闭等待 run，数据库危险操作也把等待态视为活跃工作。
+
 新执行记录会快照实际模型和 variant，并在 OpenCode JSONL 前附加一条 SuperTask 命令元数据，保存 Worker 真正传给 launcher 的可执行文件、参数数组和 `cwd`。Dashboard 从该结构生成可复制的终端命令，并分开展示 Agent 文本、错误、工具与原始日志；旧 run 没有元数据时仍可查看原始输出。variant 为空时只传模型；非空时按 OpenCode 2 语法合并为 `model#variant` 后通过 `-m` 传递。
 
 排空证明使用双向确认：Worker 校验 launcher 发来的 UUID 后回送同 UUID，launcher 收件后才退出。该握手不依赖 Bun 旧版本不可靠的 `process.send` callback，同时保留“父进程确实收到证明”这一结算前提。
@@ -85,7 +87,7 @@ Worker 通过无 LLM 的 launcher 直接执行目标 Agent，不再嵌套 `super
 
 Dashboard 的文件夹浏览只作用于回环地址上的本机路径选择。选定 `cwd` 后，Gateway 通过 OpenCode 2 Client 的项目位置参数读取 Agent 和模型目录，结果短时缓存；新任务下拉框过滤 `subagent` 和历史 `supertask-runner`，只提供可直接传给 `opencode2 run --agent` 的 Agent，并按模型元数据列出其声明支持的 variants。编辑旧任务时保留数据库原值，即使该模型或 variant 当前不可发现也不会因不相关编辑被强制改写。
 
-`running`、任务终态和 `task_runs` 执行终态只由 Gateway 写入。CLI 和插件不暴露 `start/done/fail`，避免外部调用制造没有 owner/PID 的运行记录或让任务与 run 状态分裂。Worker 的候选筛选与 `running` 转换由 `claimNext` 在同一即时事务完成，并使用事务返回的最新任务快照，外部编辑不能插入两阶段窗口破坏批次串行或让 Worker 执行旧配置。普通任务的可编辑配置由 `TaskService.update` 统一处理，只接受 `pending`、`failed` 和 `dead_letter`；不允许迁移 `cwd` 或改依赖，运行中与完成/取消终态拒绝修改，避免已执行 run 与任务配置失真。Dashboard 与 `supertask edit` 共用该边界。
+`running` 和普通执行终态由 Gateway 写入；唯一例外是 Gateway 创建的 `awaiting_input` run 可由绑定该 run ID、数据库作用域和 Session ID 的 Herdr CLI attach 包装器原子完成。CLI 和插件不暴露通用 `start/done/fail`，避免外部调用制造没有 owner/PID 的运行记录或让任务与 run 状态分裂。Worker 的候选筛选与 `running` 转换由 `claimNext` 在同一即时事务完成，并使用事务返回的最新任务快照，外部编辑不能插入两阶段窗口破坏批次串行或让 Worker 执行旧配置。普通任务的可编辑配置由 `TaskService.update` 统一处理，只接受 `pending`、`failed` 和 `dead_letter`；不允许迁移 `cwd` 或改依赖，运行中、等待输入与完成/取消终态拒绝修改，避免已执行 run 与任务配置失真。Dashboard 与 `supertask edit` 共用该边界。
 
 ## 状态与重试语义
 
@@ -125,7 +127,7 @@ pending / running / failed ──cancel──> cancelled
 
 - Scheduler 只克隆普通任务，实际执行仍遵循队列优先级、批次、重试和超时规则。
 - Dashboard 创建和编辑都复用 `TaskTemplateService` 的校验；编辑在即时事务内重算 `nextRunAt`，保留启用状态和历史执行时间，并只影响之后生成的任务。Scheduler 克隆前会核对扫描到的触发时间，避免并发编辑后按旧时间提前执行。
-- `maxInstances` 只限制自动调度，统计同模板下 `pending`、`running` 和仍有自动重试预算的 `failed`。Dashboard 手动“立即运行一次”始终创建普通 `pending` 任务；该任务仍计入后续自动调度的活跃实例数，并在 Worker 全局并发已满时排队。
+- `maxInstances` 只限制自动调度，统计同模板下 `pending`、`running`、`awaiting_input` 和仍有自动重试预算的 `failed`。Dashboard 手动“立即运行一次”始终创建普通 `pending` 任务；该任务仍计入后续自动调度的活跃实例数，并在 Worker 全局并发已满时排队。
 - `cron`/`recurring` 到期但已达 `maxInstances` 时会原子推进到下一触发点，避免每个 tick 重复抢写同一模板；`delayed` 仍保持原触发点等待空位。
 - 到期扫描按 `(nextRunAt, id)` 使用每批 100 条的游标，单个 tick 不会把全部过期模板一次性装入内存。
 - `delayed` 成功克隆一次后自动禁用。
@@ -149,7 +151,7 @@ pending / running / failed ──cancel──> cancelled
 
 ## 安全边界
 
-Dashboard 只绑定 `127.0.0.1`，所有请求的 Host 必须是 `localhost`、`127.0.0.1` 或 `[::1]`，浏览器写请求还检查 `Sec-Fetch-Site` 和同源 `Origin`，数据库字符串输出到 HTML 前转义。网页需要 PM2/systemd 状态时通过独立、总超时受限的 Bun runner 异步探测，并在 Gateway 内短时缓存，不阻塞 Worker、Watchdog 或锁心跳。这是本机可信用户边界，不是完整鉴权系统；不要通过反向代理或端口转发直接暴露到不可信网络。
+Dashboard 默认绑定 `127.0.0.1`；显式配置单一 `dashboard.host` 时，该主机名也进入严格 Host 校验。浏览器写请求检查 `Sec-Fetch-Site` 和同源 `Origin`，数据库字符串输出到 HTML 前转义。网页需要 PM2/systemd 状态时通过独立、总超时受限的 Bun runner 异步探测，并在 Gateway 内短时缓存，不阻塞 Worker、Watchdog 或锁心跳。这是可信本机/私网边界，不是完整鉴权系统；不要暴露到不可信网络。
 
 数据库危险操作集中在 `DatabaseMaintenanceService`：备份通过 SQLite 序列化得到一致快照，并转换成无需 WAL sidecar 的独立文件；清空在 `BEGIN IMMEDIATE` 内完成备份并动态删除全部业务表数据（包括新版本 expand-only 表），同时保留 `gateway_lock` 和 migration 元数据，循环外键通过事务级延迟检查收敛；恢复从已打开的 SQLite 源连接序列化包含已提交 WAL 页的一致快照，拒绝当前库的符号链接/硬链接别名，执行缺失 migration 和复检，再动态比较 source/live 业务表与可写列。source-only 表/列会在任何删除前失败关闭；双方共有的未来列完整复制；live-only 列仅在可空或带默认值时允许，live-only 新表按旧时间点的空状态清理，避免旧二进制恢复新快照或新二进制恢复旧快照时形成混合数据。最终在当前连接的 `BEGIN EXCLUSIVE` 事务中原位替换业务数据。恢复期间并发写入只能在事务前完成或在提交后成功，不存在“写入已返回成功却被文件换位静默丢失”的窗口。CLI 层只对“PM2 PID 与当前数据库新鲜 ready 锁一致”的 Gateway 自动停启，并在操作失败时恢复原运行状态；其他活跃 Gateway 仍由 Service 拒绝，避免误杀另一套实例。Dashboard 清空只允许当前 Gateway 且仍拒绝运行中任务。恢复会清理运行时锁，并把快照中的遗留运行状态收敛为可重新调度的状态。Watchdog 历史清理使用防重入、有索引的有界事务批次；不可恢复的依赖通过递归事件更新一次收敛整条下游链，不再在每个 Worker poll 全局扫描。
 

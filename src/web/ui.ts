@@ -51,6 +51,7 @@ const ZH = {
     'action.hideHidden': '隐藏隐藏文件夹',
     'status.pending': '待执行',
     'status.running': '运行中',
+    'status.awaiting_input': '等待 Will',
     'status.done': '已完成',
     'status.failed': '等待重试',
     'status.dead_letter': '已停止',
@@ -60,6 +61,7 @@ const ZH = {
     'status.executionStillActive': '执行进程仍在退出，暂时占用并发',
     'status.unknown': '未知',
     'runStatus.running': '运行中',
+    'runStatus.awaiting_input': '等待 Will',
     'runStatus.done': '成功',
     'runStatus.failed': '失败',
     'stats.total': '总任务',
@@ -359,6 +361,7 @@ const EN: Record<MessageKey, string> = {
     'action.hideHidden': 'Hide hidden folders',
     'status.pending': 'Pending',
     'status.running': 'Running',
+    'status.awaiting_input': 'Awaiting Will',
     'status.done': 'Done',
     'status.failed': 'Waiting to retry',
     'status.dead_letter': 'Stopped',
@@ -368,6 +371,7 @@ const EN: Record<MessageKey, string> = {
     'status.executionStillActive': 'The execution process is still stopping and temporarily occupies a slot',
     'status.unknown': 'Unknown',
     'runStatus.running': 'Running',
+    'runStatus.awaiting_input': 'Awaiting Will',
     'runStatus.done': 'Succeeded',
     'runStatus.failed': 'Failed',
     'stats.total': 'Total tasks',
@@ -844,6 +848,7 @@ const STYLES = `
   .b-pending { color:var(--text-2); background:var(--surface-3); }
   .b-running { color:var(--blue); background:var(--blue-soft); }
   .b-running::before { animation:pulse 1.7s ease-in-out infinite; }
+  .b-awaiting_input { color:var(--purple); background:var(--purple-soft); }
   .b-done { color:var(--green); background:var(--green-soft); }
   .b-failed { color:var(--red); background:var(--red-soft); }
   .b-dead_letter { color:var(--yellow); background:var(--yellow-soft); }
@@ -1090,7 +1095,7 @@ function clientMessages(locale: Locale) {
         'details.heartbeat', 'details.process', 'details.history', 'details.noHistory',
         'details.none', 'details.default', 'details.enabledYes', 'details.enabledNo',
         'table.name', 'table.agent', 'table.model', 'table.status', 'table.duration',
-        'template.scheduleType', 'status.pending', 'status.running', 'status.done',
+        'template.scheduleType', 'status.pending', 'status.running', 'status.awaiting_input', 'status.done',
         'status.failed', 'status.dead_letter', 'status.cancelled', 'status.unknown',
         'runStatus.running', 'runStatus.done', 'runStatus.failed',
         'schedule.cron', 'schedule.recurring', 'schedule.delayed', 'schedule.unknown',

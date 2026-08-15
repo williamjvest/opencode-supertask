@@ -3,6 +3,7 @@ import SuperTaskPlugin, { shouldAttemptGatewayReplacement, SuperTaskTools } from
 import { setupTestDb } from './helpers/mock-db';
 import { TaskService } from '../src/core/services/task.service';
 import { MANAGED_RUN_ENV, MANAGED_RUN_ENV_VALUE } from '../src/core/launch-protocol';
+import { extractHandoffMessage } from '../src/core/handoff-protocol';
 
 const originalPm2Bin = process.env.SUPERTASK_PM2_BIN;
 
@@ -57,11 +58,12 @@ describe('OpenCode 插件注册', () => {
         else process.env.SUPERTASK_PM2_BIN = originalPm2Bin;
     });
 
-    test('只注册不会绕过 Gateway 执行所有权的 8 个工具并注入系统说明', async () => {
+    test('注册 Gateway 安全工具和显式人工交接协议并注入系统说明', async () => {
         const { registered, hooks } = await setupPlugin();
         expect([...registered.keys()].sort()).toEqual([
             'supertask_add',
             'supertask_get',
+            'supertask_handoff',
             'supertask_list',
             'supertask_next',
             'supertask_retry',
@@ -79,6 +81,15 @@ describe('OpenCode 插件注册', () => {
         expect(output.system[0].text).toContain('即使任务属于不同项目目录');
         expect(output.system[0].text).toContain('`globalBatch.activeRunning`');
         expect(output.system[0].text).toContain('若任务 B 必须等待任务 A 完成');
+        expect(output.system[0].text).toContain('supertask_handoff');
+
+        const handoff = registered.get('supertask_handoff');
+        if (!handoff) throw new Error('supertask_handoff 未注册');
+        const handoffResult = await handoff.execute(
+            { message: 'Approve the migration target.' },
+            { sessionID: 'ses_handoff_test' },
+        );
+        expect(extractHandoffMessage(handoffResult.content ?? '')).toBe('Approve the migration target.');
 
         const add = SuperTaskTools.supertask_add;
         const schedule = SuperTaskTools.supertask_schedule;
