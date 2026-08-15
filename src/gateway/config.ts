@@ -23,6 +23,7 @@ export interface GatewayConfig {
     };
     dashboard: {
         enabled: boolean;
+        host?: string;
         port: number;
     };
 }
@@ -48,6 +49,7 @@ const DEFAULT_CONFIG: GatewayConfig = {
     },
     dashboard: {
         enabled: true,
+        host: '127.0.0.1',
         port: 4680,
     },
 };
@@ -91,6 +93,20 @@ function booleanAt(
     const value = source[key];
     if (value === undefined) return fallback;
     if (typeof value !== 'boolean') throw new Error(`${path}.${key} 必须是布尔值`);
+    return value;
+}
+
+function stringAt(
+    source: Record<string, unknown>,
+    key: string,
+    fallback: string,
+    path: string,
+): string {
+    const value = source[key];
+    if (value === undefined) return fallback;
+    if (typeof value !== 'string' || value.trim() === '' || value.length > 253) {
+        throw new Error(`${path}.${key} 必须是非空字符串`);
+    }
     return value;
 }
 
@@ -147,6 +163,7 @@ export function validateConfig(input: unknown): GatewayConfig {
         },
         dashboard: {
             enabled: booleanAt(dashboard, 'enabled', DEFAULT_CONFIG.dashboard.enabled, 'dashboard'),
+            host: stringAt(dashboard, 'host', DEFAULT_CONFIG.dashboard.host!, 'dashboard'),
             port: integerAt(dashboard, 'port', DEFAULT_CONFIG.dashboard.port, 1, 65_535, 'dashboard'),
         },
     };

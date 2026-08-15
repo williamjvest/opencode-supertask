@@ -55,6 +55,7 @@ describe('Gateway 配置', () => {
     test('拒绝越界、非整数和互相冲突的配置', () => {
         expect(() => validateConfig({ worker: { maxConcurrency: 0 } })).toThrow('worker.maxConcurrency');
         expect(() => validateConfig({ dashboard: { port: 70000 } })).toThrow('dashboard.port');
+        expect(() => validateConfig({ dashboard: { host: '' } })).toThrow('dashboard.host');
         expect(() => validateConfig({ worker: { pollIntervalMs: 10.5 } })).toThrow('worker.pollIntervalMs');
         expect(() => validateConfig({ worker: { shutdownGracePeriodMs: -1 } })).toThrow('worker.shutdownGracePeriodMs');
         expect(() => validateConfig({

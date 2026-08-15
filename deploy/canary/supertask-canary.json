@@ -19,6 +19,7 @@
   },
   "dashboard": {
     "enabled": true,
+    "host": "100.85.87.53",
     "port": 14680
   }
 }

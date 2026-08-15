@@ -2,7 +2,7 @@
 
 Asmond-only, isolated SuperTask pilot. It does not replace or modify the production OC2 scheduler.
 
-- Dashboard: `http://127.0.0.1:14680`
+- Dashboard: `http://asmond.story-mimosa.ts.net:14680` (tailnet only)
 - Database: `~/.local/share/opencode-supertask-canary/tasks.db`
 - Logs: `~/.local/state/opencode-supertask-canary/`
 - LaunchAgent: `com.vv.supertask-canary`
@@ -16,7 +16,7 @@ Verify with:
 ```sh
 launchctl print gui/$(id -u)/com.vv.supertask-canary
 launchctl print gui/$(id -u)/com.vv.supertask-canary-heartbeat
-curl -fsS http://127.0.0.1:14680/health
+curl -fsS http://100.85.87.53:14680/health
 SUPERTASK_DB_PATH="$HOME/.local/share/opencode-supertask-canary/tasks.db" \
 SUPERTASK_CONFIG_PATH="$PWD/deploy/canary/supertask-canary.json" \
 bun dist/cli/index.js list

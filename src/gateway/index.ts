@@ -273,7 +273,7 @@ async function main() {
             if (shuttingDown) return;
             setDashboardRuntimeConfig(cfg);
             dashboardServer = Bun.serve({
-                hostname: '127.0.0.1',
+                hostname: cfg.dashboard.host ?? '127.0.0.1',
                 port: cfg.dashboard.port,
                 fetch: dashboardApp.fetch,
             });
@@ -281,7 +281,7 @@ async function main() {
                 ts: new Date().toISOString(),
                 level: 'info',
                 msg: 'Dashboard started',
-                url: `http://localhost:${cfg.dashboard.port}`,
+                url: `http://${cfg.dashboard.host ?? '127.0.0.1'}:${cfg.dashboard.port}`,
             }));
         }
 

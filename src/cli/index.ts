@@ -552,7 +552,7 @@ program
     .action(async () => {
         const { loadConfig } = await import('@gateway/config');
         const cfg = loadConfig();
-        const url = `http://localhost:${cfg.dashboard.port}`;
+        const url = `http://${cfg.dashboard.host ?? '127.0.0.1'}:${cfg.dashboard.port}`;
         console.log(`Dashboard: ${url}`);
         try {
             const { execSync } = await import('child_process');
@@ -602,7 +602,7 @@ program
         let dashboard: { enabled: boolean; ok: boolean; url: string; status: number | null; error: string | null } = {
             enabled: config.dashboard.enabled,
             ok: !config.dashboard.enabled,
-            url: `http://127.0.0.1:${config.dashboard.port}/health`,
+            url: `http://${config.dashboard.host ?? '127.0.0.1'}:${config.dashboard.port}/health`,
             status: null,
             error: null,
         };
