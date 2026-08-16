@@ -22,9 +22,9 @@ The pilot retains one harmless `infra` task every six hours. The prompt returns 
 - Working directory: `/Users/williamvest`
 - Timeout/retries: 10 minutes / 1 retry with 5-minute backoff
 - Gatus dead-man: existing `loops_task-janitor` endpoint, unchanged
-- First scheduled SuperTask run: 2026-08-16 at 07:00 local
+- First scheduled SuperTask run: 2026-08-16 at 07:00 local — verified clean
 
-Do not migrate another loop until this run completes successfully and its task/run history, report/spine writes, and Gatus heartbeat are verified. Daily brief and email loops migrate last.
+The first production run created exactly one task and one run, completed at 07:01:49 with no retry or handoff, wrote `reports/2026-08-16.md`, refreshed `STATE.md`, appended `loop-run-log.md`, and posted a successful Gatus heartbeat at 11:01:39 UTC. The report contained 30 findings (16 new), 9 duplicate candidates, zero unassigned, and zero stale tasks. The migration gate is cleared for the next low-risk report-only loop. Daily brief and email loops still migrate last.
 
 For an explicit human handoff test, a managed Agent calls `supertask_handoff`. The original headless run becomes `awaiting_input`, a persistent tab opens in Herdr's `Scheduled Handoffs` workspace, and the same OpenCode 2 session resumes there. Exiting that TUI normally completes the task.
 
