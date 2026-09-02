@@ -19,7 +19,7 @@
   },
   "dashboard": {
     "enabled": true,
-    "host": "asmond.story-mimosa.ts.net",
+    "host": "asmond-1.story-mimosa.ts.net",
     "port": 14680
   },
   "handoff": {
